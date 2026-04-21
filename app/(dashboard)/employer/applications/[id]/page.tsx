@@ -1,0 +1,419 @@
+"use client";
+
+import Link from "next/link";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { routes } from "@/lib/api-routes";
+import { ApiError } from "@/lib/api-base";
+import { RoleGuard } from "@/components/role-guard";
+import { useSession } from "@/components/providers/session-provider";
+import type {
+  Application,
+  ApplicationStatus,
+  Internship,
+  InterviewPrepResponse,
+  SkillBadge,
+} from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Card, CardTitle } from "@/components/ui/card";
+import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
+
+const appStatuses: ApplicationStatus[] = [
+  "SUBMITTED",
+  "REVIEWING",
+  "SHORTLISTED",
+  "INTERVIEW",
+  "OFFER",
+  "REJECTED",
+  "WITHDRAWN",
+];
+
+const statusLabel: Record<ApplicationStatus, string> = {
+  SUBMITTED:   "Подано",
+  REVIEWING:   "Рассматривается",
+  SHORTLISTED: "Отобран",
+  INTERVIEW:   "Интервью",
+  OFFER:       "Оффер",
+  REJECTED:    "Отказ",
+  WITHDRAWN:   "Отозван",
+};
+
+const statusStyle: Record<ApplicationStatus, string> = {
+  SUBMITTED:   "bg-muted text-muted-foreground",
+  REVIEWING:   "bg-blue-500/10 text-blue-700",
+  SHORTLISTED: "bg-accent/10 text-accent",
+  INTERVIEW:   "bg-violet-500/10 text-violet-700",
+  OFFER:       "bg-success/10 text-success",
+  REJECTED:    "bg-danger/10 text-danger",
+  WITHDRAWN:   "bg-muted/60 text-muted-foreground",
+};
+
+const pipelineOrder: ApplicationStatus[] = [
+  "SUBMITTED",
+  "REVIEWING",
+  "SHORTLISTED",
+  "INTERVIEW",
+  "OFFER",
+];
+
+export default function EmployerApplicationDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const appId = params.id as string;
+  const jobId = searchParams.get("jobId") ?? "";
+  const { api } = useSession();
+
+  const [app, setApp] = useState<Application | null>(null);
+  const [badges, setBadges] = useState<SkillBadge[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiQuestions, setAiQuestions] = useState<string[] | null>(null);
+  const [internshipLoading, setInternshipLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!jobId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await api.get<Application[]>(routes.applications.byJob(jobId));
+      const found = list.find((a) => a.id === appId);
+      if (!found) {
+        setError("Отклик не найден");
+        return;
+      }
+      setApp(found);
+      // Load skill badges for this student
+      try {
+        const b = await api.get<SkillBadge[]>(routes.skillTests.badgesByUser(found.studentUserId));
+        setBadges(b);
+      } catch {
+        // badges are optional
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
+    } finally {
+      setLoading(false);
+    }
+  }, [api, appId, jobId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function updateStatus(status: ApplicationStatus) {
+    if (!app) return;
+    setStatusUpdating(true);
+    try {
+      await api.patch<Application>(routes.applications.patchStatus(app.id), { status });
+      setApp((prev) => prev ? { ...prev, status } : prev);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "Ошибка");
+    } finally {
+      setStatusUpdating(false);
+    }
+  }
+
+  async function createVideoRoom() {
+    setVideoLoading(true);
+    try {
+      const res = await api.post<{ roomUrl: string }>(routes.video.createRoom(appId), {});
+      setVideoUrl(res.roomUrl);
+      window.open(res.roomUrl, "_blank");
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "Не удалось создать комнату");
+    } finally {
+      setVideoLoading(false);
+    }
+  }
+
+  async function loadInterviewPrep() {
+    if (!app?.jobId) return;
+    setAiLoading(true);
+    try {
+      const res = await api.get<InterviewPrepResponse>(
+        `${routes.ai.interviewPrep}?jobId=${app.jobId}`,
+      );
+      setAiQuestions(res.questions);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "Ошибка AI");
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function createInternship() {
+    if (!app) return;
+    setInternshipLoading(true);
+    try {
+      const res = await api.post<Internship>(routes.internships.create, {
+        applicationId: app.id,
+      });
+      router.push(`/employer/internships/${res.id}`);
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "Не удалось создать стажировку");
+      setInternshipLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <RoleGuard allow={["EMPLOYER"]}>
+        <PageContainer>
+          <LoadingHint />
+        </PageContainer>
+      </RoleGuard>
+    );
+  }
+
+  if (error || !app) {
+    return (
+      <RoleGuard allow={["EMPLOYER"]}>
+        <PageContainer>
+          <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {error ?? "Отклик не найден"}
+          </p>
+        </PageContainer>
+      </RoleGuard>
+    );
+  }
+
+  const profile = app.studentProfile as {
+    firstName?: string;
+    lastName?: string;
+    university?: string;
+    specialty?: string;
+  } | null | undefined;
+  const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ");
+  const pipelineIdx = pipelineOrder.indexOf(app.status);
+
+  return (
+    <RoleGuard allow={["EMPLOYER"]}>
+      <PageContainer>
+        <div className="mb-6 flex flex-wrap gap-3 text-sm">
+          {jobId ? (
+            <Link
+              href={`/employer/jobs/${jobId}/applications`}
+              className="font-medium text-muted-foreground transition-colors hover:text-accent"
+            >
+              ← Все отклики
+            </Link>
+          ) : (
+            <Link
+              href="/employer/jobs"
+              className="font-medium text-muted-foreground transition-colors hover:text-accent"
+            >
+              ← Мои вакансии
+            </Link>
+          )}
+        </div>
+
+        <PageHeader
+          title={`Отклик: ${fullName || app.student?.email || app.studentUserId}`}
+          description={app.job?.title ? `Вакансия: ${app.job.title}` : undefined}
+        />
+
+        {/* Status pipeline */}
+        <Card className="mb-5">
+          <CardTitle as="h2" className="mb-4">Воронка найма</CardTitle>
+          <div className="flex flex-wrap gap-2">
+            {pipelineOrder.map((s, i) => {
+              const isActive = i === pipelineIdx;
+              const isPast = i < pipelineIdx;
+              return (
+                <button
+                  key={s}
+                  disabled={statusUpdating}
+                  onClick={() => void updateStatus(s)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    isActive
+                      ? statusStyle[s] + " ring-2 ring-offset-1 ring-current"
+                      : isPast
+                        ? "bg-muted/60 text-muted-foreground opacity-60"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  {statusLabel[s]}
+                </button>
+              );
+            })}
+            <button
+              disabled={statusUpdating}
+              onClick={() => void updateStatus("REJECTED")}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                app.status === "REJECTED"
+                  ? statusStyle["REJECTED"] + " ring-2 ring-offset-1 ring-current"
+                  : "bg-muted text-muted-foreground hover:bg-danger/10 hover:text-danger"
+              }`}
+            >
+              {statusLabel["REJECTED"]}
+            </button>
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Быстрая смена:</span>
+            <select
+              className="rounded-xl border border-border bg-card px-3 py-1.5 text-sm shadow-sm outline-none"
+              value={app.status}
+              disabled={statusUpdating}
+              onChange={(e) => void updateStatus(e.target.value as ApplicationStatus)}
+            >
+              {appStatuses.map((s) => (
+                <option key={s} value={s}>{statusLabel[s]}</option>
+              ))}
+            </select>
+          </div>
+        </Card>
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          {/* Candidate card */}
+          <Card>
+            <CardTitle as="h2" className="mb-4">Кандидат</CardTitle>
+            <div className="space-y-2 text-sm">
+              {fullName && (
+                <p>
+                  <span className="text-muted-foreground">Имя:</span>{" "}
+                  <span className="font-medium text-foreground">{fullName}</span>
+                </p>
+              )}
+              <p>
+                <span className="text-muted-foreground">Email:</span>{" "}
+                <span className="font-medium text-foreground">{app.student?.email ?? app.studentUserId}</span>
+              </p>
+              {profile?.university && (
+                <p>
+                  <span className="text-muted-foreground">Вуз:</span>{" "}
+                  <span className="font-medium text-foreground">{profile.university}</span>
+                </p>
+              )}
+              {profile?.specialty && (
+                <p>
+                  <span className="text-muted-foreground">Специальность:</span>{" "}
+                  <span className="font-medium text-foreground">{profile.specialty}</span>
+                </p>
+              )}
+              <Link
+                href={`/profiles/${app.studentUserId}`}
+                target="_blank"
+                className="mt-2 inline-block text-accent hover:underline"
+              >
+                Открыть полный профиль ↗
+              </Link>
+            </div>
+          </Card>
+
+          {/* AI Score */}
+          <Card>
+            <CardTitle as="h2" className="mb-4">AI-оценка</CardTitle>
+            {app.employerScore != null ? (
+              <div className="flex items-center gap-4">
+                <div
+                  className={`flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-full text-2xl font-bold tabular-nums ${
+                    app.employerScore >= 70
+                      ? "bg-success/15 text-success"
+                      : app.employerScore >= 40
+                        ? "bg-accent/15 text-accent"
+                        : "bg-danger/15 text-danger"
+                  }`}
+                >
+                  {app.employerScore}
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  <p>Балл соответствия кандидата вакансии, рассчитан автоматически.</p>
+                  <p className="mt-1">
+                    {app.employerScore >= 70
+                      ? "Высокий — рекомендуется к интервью."
+                      : app.employerScore >= 40
+                        ? "Средний — стоит рассмотреть."
+                        : "Низкий — слабое соответствие."}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Оценка ещё не рассчитана.</p>
+            )}
+          </Card>
+        </div>
+
+        {/* Skill badges */}
+        {badges.length > 0 && (
+          <Card className="mt-5">
+            <CardTitle as="h2" className="mb-3">Навыки кандидата</CardTitle>
+            <div className="flex flex-wrap gap-2">
+              {badges.map((b) => (
+                <span
+                  key={b.id}
+                  className="flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs font-medium text-accent"
+                >
+                  <span>★</span>
+                  {b.skill}
+                  <span className="opacity-70">({b.scorePercent}%)</span>
+                </span>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Cover letter */}
+        {app.coverLetter && (
+          <Card className="mt-5">
+            <CardTitle as="h2" className="mb-3">Сопроводительное письмо</CardTitle>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+              {app.coverLetter}
+            </p>
+          </Card>
+        )}
+
+        {/* AI interview prep */}
+        <Card className="mt-5">
+          <CardTitle as="h2" className="mb-3">AI: Вопросы для интервью</CardTitle>
+          {aiQuestions ? (
+            <ol className="list-decimal space-y-2 pl-5 text-sm">
+              {aiQuestions.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ol>
+          ) : (
+            <Button
+              variant="secondary"
+              onClick={() => void loadInterviewPrep()}
+              disabled={aiLoading}
+            >
+              {aiLoading ? "Загрузка…" : "Сгенерировать вопросы"}
+            </Button>
+          )}
+        </Card>
+
+        {/* Actions */}
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Link href={`/applications/${appId}/chat`}>
+            <Button variant="secondary">Открыть чат</Button>
+          </Link>
+          <Button
+            variant="secondary"
+            onClick={() => void createVideoRoom()}
+            disabled={videoLoading}
+          >
+            {videoLoading ? "Создание…" : "Видеоинтервью"}
+          </Button>
+          {videoUrl && (
+            <a href={videoUrl} target="_blank" className="text-sm text-accent hover:underline self-center">
+              Ссылка на комнату ↗
+            </a>
+          )}
+          {app.status === "OFFER" && (
+            <Button
+              onClick={() => void createInternship()}
+              disabled={internshipLoading}
+            >
+              {internshipLoading ? "Создание…" : "Открыть трекер стажировки"}
+            </Button>
+          )}
+        </div>
+      </PageContainer>
+    </RoleGuard>
+  );
+}
