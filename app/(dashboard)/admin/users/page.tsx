@@ -1,15 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
 import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
 import type { AdminUserRow, EmployerVerificationStatus, UserRole } from "@/lib/types";
+import { verificationStatusBadge } from "@/lib/employer-display";
+import {
+  USER_ROLE_OPTIONS,
+  userRoleBadgeVariant,
+  userRoleFilterLabel,
+  userRoleLabel,
+} from "@/lib/user-display";
+import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
+import { BackendGapNote } from "@/components/profile/backend-gap-note";
+import { EmptyState, PageContainer, PageHeader } from "@/components/layout/page";
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 
 type UsersResponse = {
   data: AdminUserRow[];
@@ -18,29 +30,26 @@ type UsersResponse = {
   limit: number;
 };
 
-const verificationOptions: EmployerVerificationStatus[] = ["PENDING", "VERIFIED", "REJECTED"];
-
-const verificationStyle: Record<EmployerVerificationStatus, string> = {
-  PENDING:  "bg-amber-500/10 text-amber-700",
-  VERIFIED: "bg-success/10 text-success",
-  REJECTED: "bg-danger/10 text-danger",
-};
-const verificationLabel: Record<EmployerVerificationStatus, string> = {
-  PENDING:  "На проверке",
-  VERIFIED: "Верифицирован",
-  REJECTED: "Отклонён",
-};
-
-const roleStyle: Record<UserRole, string> = {
-  STUDENT:  "bg-accent/10 text-accent",
-  EMPLOYER: "bg-amber-500/10 text-amber-700",
-  ADMIN:    "bg-violet-500/10 text-violet-700",
-};
-
-const selectClass =
-  "rounded-xl border border-border bg-card px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/25";
+const verificationOptions: EmployerVerificationStatus[] = [
+  "PENDING",
+  "VERIFIED",
+  "REJECTED",
+];
 
 type VerifyingState = { userId: string; status: EmployerVerificationStatus } | null;
+
+function formatRegisteredAt(iso: string): string {
+  return new Date(iso).toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function employerCompanyLabel(companyName: string | null | undefined): string {
+  const name = companyName?.trim();
+  return name || "—";
+}
 
 export default function AdminUsersPage() {
   const { api } = useSession();
@@ -51,19 +60,16 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState<UserRole | "">("");
   const [verifying, setVerifying] = useState<VerifyingState>(null);
-
-  // Job moderation
-  const [jobId, setJobId] = useState("");
-  const [moderateStatus, setModerateStatus] = useState<"PAUSED" | "ARCHIVED">("PAUSED");
-  const [modError, setModError] = useState<string | null>(null);
-  const [modSuccess, setModSuccess] = useState<string | null>(null);
-  const [modLoading, setModLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [togglingUserId, setTogglingUserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get<UsersResponse>(routes.admin.users(page, limit));
+      const data = await api.get<UsersResponse>(
+        routes.admin.users(page, limit, roleFilter || undefined),
+      );
       setResult(data);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка");
@@ -71,279 +77,337 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [api, page, limit]);
+  }, [api, page, limit, roleFilter]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Reset to page 1 when filter changes
   useEffect(() => {
     setPage(1);
   }, [roleFilter]);
 
-  async function setEmployerVerification(userId: string, status: EmployerVerificationStatus) {
+  async function setEmployerVerification(
+    userId: string,
+    status: EmployerVerificationStatus,
+  ) {
     setVerifying({ userId, status });
+    setActionError(null);
     try {
       await api.patch(routes.admin.employerVerification(userId), { status });
       await load();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Ошибка");
+      setActionError(e instanceof ApiError ? e.message : "Ошибка");
     } finally {
       setVerifying(null);
     }
   }
 
-  async function moderateJob() {
-    const id = jobId.trim();
-    if (!id) return;
-    setModError(null);
-    setModSuccess(null);
-    setModLoading(true);
+  async function toggleUserActive(userId: string, isActive: boolean) {
+    setTogglingUserId(userId);
+    setActionError(null);
     try {
-      await api.patch(routes.admin.moderateJob(id), { status: moderateStatus });
-      setJobId("");
-      setModSuccess(`Статус вакансии обновлён → ${moderateStatus}`);
+      await api.patch(routes.admin.userStatus(userId), { isActive });
+      await load();
     } catch (e) {
-      setModError(e instanceof ApiError ? e.message : "Ошибка");
+      setActionError(e instanceof ApiError ? e.message : "Ошибка");
     } finally {
-      setModLoading(false);
+      setTogglingUserId(null);
     }
   }
 
   const rows = result?.data ?? [];
-  const filtered = roleFilter ? rows.filter((u) => u.role === roleFilter) : rows;
   const totalPages = result ? Math.ceil(result.total / limit) : 1;
+
+  const backendGaps = useMemo(() => {
+    if (roleFilter !== "EMPLOYER" && roleFilter !== "") return [];
+    const employers = rows.filter((u) => u.role === "EMPLOYER");
+    if (employers.length === 0) return [];
+    const fieldMissing = employers.every((u) => u.companyName === undefined);
+    if (!fieldMissing) return [];
+    return [
+      "GET /admin/users — для role=EMPLOYER добавить companyName в ответ.",
+    ];
+  }, [rows, roleFilter]);
 
   return (
     <RoleGuard allow={["ADMIN"]}>
       <PageContainer>
         <PageHeader
           title="Пользователи"
-          description="Список аккаунтов, верификация работодателей и модерация вакансий."
-        />
-
-        {/* Job moderation */}
-        <Card className="mb-8">
-          <CardTitle as="h2" className="mb-1">Модерация вакансии</CardTitle>
-          <CardDescription className="mb-5">
-            PATCH /admin/jobs/:id/moderate — допустимые статусы: PAUSED и ARCHIVED.
-          </CardDescription>
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="min-w-[220px] flex-1">
-              <Input
-                label="UUID вакансии"
-                value={jobId}
-                onChange={(e) => { setJobId(e.target.value); setModSuccess(null); setModError(null); }}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-foreground">Действие</span>
-              <select
-                className={selectClass}
-                value={moderateStatus}
-                onChange={(e) => setModerateStatus(e.target.value as "PAUSED" | "ARCHIVED")}
-              >
-                <option value="PAUSED">Приостановить (PAUSED)</option>
-                <option value="ARCHIVED">Архивировать (ARCHIVED)</option>
-              </select>
-            </div>
-            <Button
-              type="button"
-              disabled={modLoading || !jobId.trim()}
-              onClick={() => void moderateJob()}
-            >
-              {modLoading ? "Применение…" : "Применить"}
-            </Button>
-          </div>
-          {modError && (
-            <p className="mt-3 rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">
-              {modError}
-            </p>
-          )}
-          {modSuccess && (
-            <p className="mt-3 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
-              {modSuccess}
-            </p>
-          )}
-        </Card>
-
-        {/* Users table */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="text-lg font-semibold text-foreground">Пользователи</h2>
-            {result && (
-              <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                {result.total}
-              </span>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Роль</span>
-              <select
-                className={selectClass}
+          description="Аккаунты платформы и верификация работодателей."
+          action={
+            <div className="flex flex-wrap items-end gap-3">
+              <Select
+                label="Роль"
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value as UserRole | "")}
+                wrapperClassName="min-w-[160px]"
               >
                 <option value="">Все роли</option>
-                <option value="STUDENT">STUDENT</option>
-                <option value="EMPLOYER">EMPLOYER</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-            </div>
-            <div className="flex items-end gap-2 pb-0.5">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-              >
-                ← Назад
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                {page} / {totalPages || 1}
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={!result || page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Вперёд →
+                {USER_ROLE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </Select>
+              {result ? (
+                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  {result.total}
+                </span>
+              ) : null}
+              <Button type="button" variant="secondary" onClick={() => void load()}>
+                Обновить
               </Button>
             </div>
-          </div>
-        </div>
+          }
+        />
 
-        {error && (
-          <p className="mb-4 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+        <BackendGapNote items={backendGaps} />
+
+        {actionError ? (
+          <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {actionError}
+          </p>
+        ) : null}
+
+        {error ? (
+          <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {error}
           </p>
-        )}
+        ) : null}
 
         {loading ? (
-          <LoadingHint />
+          <SimpleListSkeleton count={6} />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            title="Нет пользователей"
+            description={
+              roleFilter
+                ? `По фильтру «${userRoleFilterLabel(roleFilter)}» ничего не найдено.`
+                : "Список аккаунтов пуст."
+            }
+          />
         ) : (
           <>
-            <div className="overflow-x-auto rounded-2xl border border-border/90 shadow-sm ring-1 ring-black/[0.03]">
-              <table className="w-full min-w-[700px] text-left text-sm">
-                <thead className="bg-muted/60">
-                  <tr>
-                    <th className="p-4 font-semibold text-foreground">Email</th>
-                    <th className="p-4 font-semibold text-foreground">Роль</th>
-                    <th className="p-4 font-semibold text-foreground">Активен</th>
-                    <th className="p-4 font-semibold text-foreground">Зарегистрирован</th>
-                    <th className="p-4 font-semibold text-foreground">Верификация</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((u) => (
-                    <tr
-                      key={u.id}
-                      className="border-t border-border/80 transition-colors hover:bg-muted/30"
-                    >
-                      <td className="p-4">
-                        <span className="font-medium text-foreground">{u.email}</span>
-                        <span className="ml-2 font-mono text-xs text-muted-foreground">
-                          {u.id.slice(0, 8)}…
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${roleStyle[u.role] ?? "bg-muted text-muted-foreground"}`}
-                        >
-                          {u.role}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                            u.isActive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          {u.isActive ? "Да" : "Нет"}
-                        </span>
-                      </td>
-                      <td className="p-4 tabular-nums text-muted-foreground">
-                        {new Date(u.createdAt).toLocaleDateString("ru", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </td>
-                      <td className="p-4">
-                        {u.role === "EMPLOYER" ? (
-                          <EmployerVerificationCell
-                            userId={u.id}
-                            verifying={verifying}
-                            onVerify={setEmployerVerification}
-                          />
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {filtered.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="p-8 text-center text-sm text-muted-foreground">
-                        Нет пользователей{roleFilter ? ` с ролью ${roleFilter}` : ""} на этой странице.
-                      </td>
-                    </tr>
+            <ul className="flex flex-col gap-2">
+              {rows.map((u) => (
+                <li key={u.id}>
+                  {u.role === "EMPLOYER" ? (
+                    <EmployerUserCard
+                      user={u}
+                      verifying={verifying}
+                      togglingUserId={togglingUserId}
+                      onVerify={setEmployerVerification}
+                      onToggleActive={toggleUserActive}
+                    />
+                  ) : (
+                    <DefaultUserCard
+                      user={u}
+                      togglingUserId={togglingUserId}
+                      onToggleActive={toggleUserActive}
+                    />
                   )}
-                </tbody>
-              </table>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-6 flex flex-col gap-3 border-t border-border/70 pt-6 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-muted-foreground">
+                Показано {rows.length} из {result?.total ?? 0}
+                {roleFilter ? ` · ${userRoleFilterLabel(roleFilter)}` : ""}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Назад
+                </Button>
+                <span className="min-w-[5rem] text-center text-sm text-muted-foreground">
+                  {page} / {totalPages || 1}
+                </span>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!result || page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Вперёд
+                </Button>
+              </div>
             </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Страница {page} · показано {filtered.length} из {result?.total ?? 0} записей
-              {roleFilter ? ` (фильтр по роли: ${roleFilter})` : ""}
-            </p>
           </>
         )}
+
+        <p className="mt-8 text-sm text-muted-foreground">
+          Модерация вакансий — на странице{" "}
+          <Link href="/admin/jobs" className="font-medium text-accent hover:underline">
+            Вакансии
+          </Link>
+          .
+        </p>
       </PageContainer>
     </RoleGuard>
   );
 }
 
-function EmployerVerificationCell({
+function EmployerVerificationActions({
   userId,
+  currentStatus,
   verifying,
   onVerify,
 }: {
   userId: string;
+  currentStatus: EmployerVerificationStatus;
   verifying: VerifyingState;
   onVerify: (userId: string, status: EmployerVerificationStatus) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
   const isLoading = verifying?.userId === userId;
 
   return (
-    <div className="flex flex-col gap-2">
-      <button
-        type="button"
-        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-        onClick={() => setOpen((v) => !v)}
-      >
-        Сменить статус
-        <span className="text-[10px]">{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div className="flex flex-wrap gap-1">
-          {verificationOptions.map((v) => (
+    <div className="flex flex-col gap-1.5 sm:items-end">
+      <span className="text-xs font-medium text-muted-foreground">Верификация</span>
+      <div className="inline-flex flex-wrap gap-1 rounded-xl border border-border bg-muted/20 p-1">
+        {verificationOptions.map((status) => {
+          const isCurrent = status === currentStatus;
+          const badge = verificationStatusBadge(status);
+          const loadingThis = isLoading && verifying?.status === status;
+          return (
             <button
-              key={v}
+              key={status}
               type="button"
-              disabled={isLoading}
-              onClick={() => { void onVerify(userId, v); setOpen(false); }}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${verificationStyle[v]} hover:opacity-80 disabled:opacity-50`}
+              disabled={isLoading || isCurrent}
+              onClick={() => void onVerify(userId, status)}
+              className={cn(
+                "rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-default",
+                isCurrent
+                  ? cn(badge.className, "shadow-sm")
+                  : "text-muted-foreground hover:bg-card hover:text-foreground disabled:opacity-50",
+              )}
             >
-              {isLoading && verifying?.status === v ? "…" : verificationLabel[v]}
+              {loadingThis ? "…" : badge.label}
             </button>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
+  );
+}
+
+function EmployerUserCard({
+  user,
+  verifying,
+  togglingUserId,
+  onVerify,
+  onToggleActive,
+}: {
+  user: AdminUserRow;
+  verifying: VerifyingState;
+  togglingUserId: string | null;
+  onVerify: (userId: string, status: EmployerVerificationStatus) => Promise<void>;
+  onToggleActive: (userId: string, isActive: boolean) => Promise<void>;
+}) {
+  const isToggling = togglingUserId === user.id;
+  const verificationStatus = user.verificationStatus ?? "PENDING";
+  const companyLabel = employerCompanyLabel(user.companyName);
+  const companyTitle = user.companyName?.trim() ?? null;
+
+  return (
+    <Card
+      padding={false}
+      className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
+    >
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate font-semibold text-foreground" title={companyLabel}>
+            {companyTitle ? (
+              <Link
+                href={`/employers/${user.id}`}
+                className="hover:text-accent hover:underline"
+              >
+                {companyTitle}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground">{companyLabel}</span>
+            )}
+          </p>
+          <Badge variant="amber">Работодатель</Badge>
+          <Badge variant={user.isActive ? "success" : "muted"}>
+            {user.isActive ? "Активен" : "Отключён"}
+          </Badge>
+        </div>
+        <p className="truncate text-sm text-muted-foreground" title={user.email}>
+          {user.email} · {formatRegisteredAt(user.createdAt)}
+        </p>
+      </div>
+
+      <EmployerVerificationActions
+        userId={user.id}
+        currentStatus={verificationStatus}
+        verifying={verifying}
+        onVerify={onVerify}
+      />
+
+      <div className="flex shrink-0 items-center sm:justify-end">
+        <Button
+          type="button"
+          variant={user.isActive ? "ghost" : "secondary"}
+          className={user.isActive ? "text-danger" : undefined}
+          disabled={isToggling}
+          onClick={() => void onToggleActive(user.id, !user.isActive)}
+        >
+          {isToggling ? "…" : user.isActive ? "Отключить" : "Включить"}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function DefaultUserCard({
+  user,
+  togglingUserId,
+  onToggleActive,
+}: {
+  user: AdminUserRow;
+  togglingUserId: string | null;
+  onToggleActive: (userId: string, isActive: boolean) => Promise<void>;
+}) {
+  const isToggling = togglingUserId === user.id;
+
+  return (
+    <Card
+      padding={false}
+      className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate font-semibold text-foreground" title={user.email}>
+            {user.email}
+          </p>
+          <Badge variant={userRoleBadgeVariant(user.role)}>
+            {userRoleLabel(user.role)}
+          </Badge>
+          <Badge variant={user.isActive ? "success" : "muted"}>
+            {user.isActive ? "Активен" : "Отключён"}
+          </Badge>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Зарегистрирован {formatRegisteredAt(user.createdAt)}
+        </p>
+      </div>
+
+      <Button
+        type="button"
+        variant={user.isActive ? "ghost" : "secondary"}
+        className={user.isActive ? "text-danger" : undefined}
+        disabled={isToggling}
+        onClick={() => void onToggleActive(user.id, !user.isActive)}
+      >
+        {isToggling ? "…" : user.isActive ? "Отключить" : "Включить"}
+      </Button>
+    </Card>
   );
 }

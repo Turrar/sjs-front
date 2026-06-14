@@ -6,7 +6,8 @@ import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
+import { PageContainer, PageHeader } from "@/components/layout/page";
+import { DashboardJobGridSkeleton } from "@/components/ui/skeleton";
 import { routes } from "@/lib/api-routes";
 import type { JobWithMatchScore, StudentProfile } from "@/lib/types";
 import { cn } from "@/lib/cn";
@@ -163,7 +164,7 @@ export default function StudentDashboardPage() {
         </div>
 
         {loadingJobs ? (
-          <LoadingHint />
+          <DashboardJobGridSkeleton count={4} />
         ) : jobsError ? (
           <p className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
             {jobsError}

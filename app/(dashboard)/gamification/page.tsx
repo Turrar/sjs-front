@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
+import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
 import type { GamificationMe, LeaderboardEntry } from "@/lib/types";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { StatsGridSkeleton, SimpleListSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 const eventLabels: Record<string, string> = {
@@ -36,6 +37,13 @@ const eventPoints: Record<string, number> = {
   REVIEW_WRITTEN: 15,
   FIRST_HIRE: 100,
 };
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return "Участник";
+  const visible = local.slice(0, 2);
+  return `${visible}***@${domain}`;
+}
 
 export default function GamificationPage() {
   const { api, user } = useSession();
@@ -68,6 +76,7 @@ export default function GamificationPage() {
   const myRank = leaderboard.findIndex((e) => e.userId === user?.id) + 1;
 
   return (
+    <RoleGuard allow={["STUDENT"]}>
     <PageContainer>
       <PageHeader
         title="Достижения"
@@ -81,7 +90,10 @@ export default function GamificationPage() {
       ) : null}
 
       {loading ? (
-        <LoadingHint />
+        <div className="space-y-6">
+          <StatsGridSkeleton count={3} />
+          <SimpleListSkeleton count={4} />
+        </div>
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
           {/* Left column */}
@@ -221,7 +233,7 @@ export default function GamificationPage() {
                           {isMe ? (
                             <span className="font-semibold text-accent">Вы</span>
                           ) : (
-                            entry.email ?? entry.userId.slice(0, 8) + "…"
+                            entry.email ? maskEmail(entry.email) : entry.userId.slice(0, 8) + "…"
                           )}
                         </span>
                         <span className="shrink-0 font-bold tabular-nums text-foreground">
@@ -237,5 +249,6 @@ export default function GamificationPage() {
         </div>
       )}
     </PageContainer>
+    </RoleGuard>
   );
 }

@@ -6,26 +6,15 @@ import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
 import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
-import type { Internship, InternshipStatus } from "@/lib/types";
+import type { Internship } from "@/lib/types";
+import { getInternshipStatus } from "@/lib/internship-display";
 import { Card } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
-
-const statusLabel: Record<InternshipStatus, string> = {
-  ACTIVE:    "Активна",
-  COMPLETED: "Завершена",
-  CANCELLED: "Отменена",
-};
-
-const statusStyle: Record<InternshipStatus, string> = {
-  ACTIVE:    "bg-success/10 text-success",
-  COMPLETED: "bg-blue-500/10 text-blue-700",
-  CANCELLED: "bg-muted/70 text-muted-foreground",
-};
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 
 function taskProgress(internship: Internship): string {
   const tasks = internship.tasks ?? [];
@@ -68,10 +57,11 @@ export default function EmployerInternshipsPage() {
           </p>
         )}
         {loading ? (
-          <LoadingHint />
+          <SimpleListSkeleton count={4} />
         ) : (
           <ul className="flex flex-col gap-4">
             {internships.map((intern) => {
+              const st = getInternshipStatus(intern.status);
               const student = intern.application?.student;
               const job = intern.application?.job;
               return (
@@ -83,9 +73,9 @@ export default function EmployerInternshipsPage() {
                           {student?.email ?? intern.studentUserId}
                         </span>
                         <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle[intern.status]}`}
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${st.className}`}
                         >
-                          {statusLabel[intern.status]}
+                          {st.label}
                         </span>
                       </div>
                       {job?.title && (

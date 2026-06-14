@@ -14,54 +14,32 @@ import type {
   InterviewPrepResponse,
   SkillBadge,
 } from "@/lib/types";
+import { EmployerVideoInterview } from "@/components/applications/video-interview-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
-
-const appStatuses: ApplicationStatus[] = [
-  "SUBMITTED",
-  "REVIEWING",
-  "SHORTLISTED",
-  "INTERVIEW",
-  "OFFER",
-  "REJECTED",
-  "WITHDRAWN",
-];
-
-const statusLabel: Record<ApplicationStatus, string> = {
-  SUBMITTED:   "Подано",
-  REVIEWING:   "Рассматривается",
-  SHORTLISTED: "Отобран",
-  INTERVIEW:   "Интервью",
-  OFFER:       "Оффер",
-  REJECTED:    "Отказ",
-  WITHDRAWN:   "Отозван",
-};
-
-const statusStyle: Record<ApplicationStatus, string> = {
-  SUBMITTED:   "bg-muted text-muted-foreground",
-  REVIEWING:   "bg-blue-500/10 text-blue-700",
-  SHORTLISTED: "bg-accent/10 text-accent",
-  INTERVIEW:   "bg-violet-500/10 text-violet-700",
-  OFFER:       "bg-success/10 text-success",
-  REJECTED:    "bg-danger/10 text-danger",
-  WITHDRAWN:   "bg-muted/60 text-muted-foreground",
-};
-
-const pipelineOrder: ApplicationStatus[] = [
-  "SUBMITTED",
-  "REVIEWING",
-  "SHORTLISTED",
-  "INTERVIEW",
-  "OFFER",
-];
+import {
+  applicationStatusOrder,
+  getStatusStyle,
+  employerScoreRingClass,
+  isTerminalApplicationStatus,
+} from "@/lib/application-display";
+import {
+  getEmployerStatusSelectOptions,
+  isEmployerPipelineStepClickable,
+  transitionErrorMessage,
+} from "@/lib/application-status-fsm";
+import { interviewPrepPath } from "@/lib/kaspi-payment";
+import { selectClass } from "@/lib/select-class";
+import { cn } from "@/lib/cn";
+import { PageContainer, PageHeader } from "@/components/layout/page";
+import { DetailPageSkeleton } from "@/components/ui/skeleton";
 
 export default function EmployerApplicationDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
   const appId = params.id as string;
-  const jobId = searchParams.get("jobId") ?? "";
+  const jobIdFromQuery = searchParams.get("jobId");
   const { api } = useSession();
 
   const [app, setApp] = useState<Application | null>(null);
@@ -69,37 +47,32 @@ export default function EmployerApplicationDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusUpdating, setStatusUpdating] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiQuestions, setAiQuestions] = useState<string[] | null>(null);
   const [internshipLoading, setInternshipLoading] = useState(false);
 
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    if (!jobId) return;
     setLoading(true);
     setError(null);
     try {
-      const list = await api.get<Application[]>(routes.applications.byJob(jobId));
-      const found = list.find((a) => a.id === appId);
-      if (!found) {
-        setError("Отклик не найден");
-        return;
-      }
+      const found = await api.get<Application>(routes.applications.byId(appId));
       setApp(found);
-      // Load skill badges for this student
       try {
-        const b = await api.get<SkillBadge[]>(routes.skillTests.badgesByUser(found.studentUserId));
+        const b = await api.get<SkillBadge[]>(
+          routes.skillTests.badgesByUser(found.studentUserId),
+        );
         setBadges(b);
       } catch {
-        // badges are optional
+        // badges optional
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
     } finally {
       setLoading(false);
     }
-  }, [api, appId, jobId]);
+  }, [api, appId]);
 
   useEffect(() => {
     void load();
@@ -108,39 +81,37 @@ export default function EmployerApplicationDetailPage() {
   async function updateStatus(status: ApplicationStatus) {
     if (!app) return;
     setStatusUpdating(true);
+    setActionError(null);
     try {
       await api.patch<Application>(routes.applications.patchStatus(app.id), { status });
       setApp((prev) => prev ? { ...prev, status } : prev);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Ошибка");
+      const status = e instanceof ApiError ? e.status : undefined;
+      setActionError(
+        e instanceof ApiError ? (status === 400 ? transitionErrorMessage(400) : e.message) : transitionErrorMessage(),
+      );
     } finally {
       setStatusUpdating(false);
-    }
-  }
-
-  async function createVideoRoom() {
-    setVideoLoading(true);
-    try {
-      const res = await api.post<{ roomUrl: string }>(routes.video.createRoom(appId), {});
-      setVideoUrl(res.roomUrl);
-      window.open(res.roomUrl, "_blank");
-    } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Не удалось создать комнату");
-    } finally {
-      setVideoLoading(false);
     }
   }
 
   async function loadInterviewPrep() {
     if (!app?.jobId) return;
     setAiLoading(true);
+    setActionError(null);
     try {
       const res = await api.get<InterviewPrepResponse>(
-        `${routes.ai.interviewPrep}?jobId=${app.jobId}`,
+        interviewPrepPath({ jobId: app.jobId, language: "ru", count: 7 }),
       );
       setAiQuestions(res.questions);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Ошибка AI");
+      const msg =
+        e instanceof ApiError && e.status === 403
+          ? "Подготовка к интервью доступна только для опубликованных вакансий."
+          : e instanceof ApiError
+            ? e.message
+            : "Сервис AI временно недоступен";
+      setActionError(msg);
     } finally {
       setAiLoading(false);
     }
@@ -149,13 +120,15 @@ export default function EmployerApplicationDetailPage() {
   async function createInternship() {
     if (!app) return;
     setInternshipLoading(true);
+    setActionError(null);
     try {
-      const res = await api.post<Internship>(routes.internships.create, {
+      const res = await api.post<Internship>(routes.internships.open, {
         applicationId: app.id,
       });
       router.push(`/employer/internships/${res.id}`);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Не удалось создать стажировку");
+      setActionError(e instanceof ApiError ? e.message : "Не удалось создать стажировку");
+    } finally {
       setInternshipLoading(false);
     }
   }
@@ -164,7 +137,7 @@ export default function EmployerApplicationDetailPage() {
     return (
       <RoleGuard allow={["EMPLOYER"]}>
         <PageContainer>
-          <LoadingHint />
+          <DetailPageSkeleton />
         </PageContainer>
       </RoleGuard>
     );
@@ -189,15 +162,20 @@ export default function EmployerApplicationDetailPage() {
     specialty?: string;
   } | null | undefined;
   const fullName = [profile?.firstName, profile?.lastName].filter(Boolean).join(" ");
-  const pipelineIdx = pipelineOrder.indexOf(app.status);
+  const pipelineIdx = applicationStatusOrder.indexOf(
+    app.status as (typeof applicationStatusOrder)[number],
+  );
+  const statusSelectOptions = getEmployerStatusSelectOptions(app.status);
+
+  const backJobId = app?.jobId ?? jobIdFromQuery;
 
   return (
     <RoleGuard allow={["EMPLOYER"]}>
       <PageContainer>
         <div className="mb-6 flex flex-wrap gap-3 text-sm">
-          {jobId ? (
+          {backJobId ? (
             <Link
-              href={`/employer/jobs/${jobId}/applications`}
+              href={`/employer/jobs/${backJobId}/applications`}
               className="font-medium text-muted-foreground transition-colors hover:text-accent"
             >
               ← Все отклики
@@ -217,52 +195,92 @@ export default function EmployerApplicationDetailPage() {
           description={app.job?.title ? `Вакансия: ${app.job.title}` : undefined}
         />
 
+        {actionError ? (
+          <p className="mb-5 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {actionError}
+          </p>
+        ) : null}
+
         {/* Status pipeline */}
         <Card className="mb-5">
           <CardTitle as="h2" className="mb-4">Воронка найма</CardTitle>
           <div className="flex flex-wrap gap-2">
-            {pipelineOrder.map((s, i) => {
-              const isActive = i === pipelineIdx;
-              const isPast = i < pipelineIdx;
-              return (
+            {isTerminalApplicationStatus(app.status) ? (
+              <span
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs font-medium ring-2 ring-offset-1 ring-accent/40",
+                  getStatusStyle(app.status).className,
+                )}
+              >
+                {getStatusStyle(app.status).label}
+              </span>
+            ) : (
+              <>
+                {applicationStatusOrder.map((s, i) => {
+                  const st = getStatusStyle(s);
+                  const isActive = app.status === s;
+                  const isPast = pipelineIdx !== -1 && i < pipelineIdx;
+                  const clickable = isEmployerPipelineStepClickable(
+                    app.status,
+                    s,
+                    i,
+                    pipelineIdx,
+                  );
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={statusUpdating || !clickable}
+                      onClick={() => void updateStatus(s)}
+                      className={cn(
+                        "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                        isActive
+                          ? cn(st.className, "ring-2 ring-offset-1 ring-accent/40")
+                          : isPast
+                            ? "bg-success/10 text-success opacity-80"
+                            : clickable
+                              ? "bg-muted text-muted-foreground hover:bg-muted/80"
+                              : "cursor-not-allowed bg-muted/50 text-muted-foreground/60",
+                      )}
+                    >
+                      {st.label}
+                    </button>
+                  );
+                })}
                 <button
-                  key={s}
-                  disabled={statusUpdating}
-                  onClick={() => void updateStatus(s)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    isActive
-                      ? statusStyle[s] + " ring-2 ring-offset-1 ring-current"
-                      : isPast
-                        ? "bg-muted/60 text-muted-foreground opacity-60"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
+                  type="button"
+                  disabled={
+                    statusUpdating ||
+                    !isEmployerPipelineStepClickable(
+                      app.status,
+                      "REJECTED",
+                      -1,
+                      pipelineIdx,
+                    )
+                  }
+                  onClick={() => void updateStatus("REJECTED")}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+                    app.status === "REJECTED"
+                      ? cn(getStatusStyle("REJECTED").className, "ring-2 ring-offset-1 ring-accent/40")
+                      : "bg-muted text-muted-foreground hover:bg-danger/10 hover:text-danger",
+                  )}
                 >
-                  {statusLabel[s]}
+                  {getStatusStyle("REJECTED").label}
                 </button>
-              );
-            })}
-            <button
-              disabled={statusUpdating}
-              onClick={() => void updateStatus("REJECTED")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                app.status === "REJECTED"
-                  ? statusStyle["REJECTED"] + " ring-2 ring-offset-1 ring-current"
-                  : "bg-muted text-muted-foreground hover:bg-danger/10 hover:text-danger"
-              }`}
-            >
-              {statusLabel["REJECTED"]}
-            </button>
+              </>
+            )}
           </div>
           <div className="mt-4 flex items-center gap-3">
             <span className="text-sm font-medium text-muted-foreground">Быстрая смена:</span>
             <select
-              className="rounded-xl border border-border bg-card px-3 py-1.5 text-sm shadow-sm outline-none"
+              className={selectClass}
               value={app.status}
               disabled={statusUpdating}
               onChange={(e) => void updateStatus(e.target.value as ApplicationStatus)}
             >
-              {appStatuses.map((s) => (
-                <option key={s} value={s}>{statusLabel[s]}</option>
+              {statusSelectOptions.map((s) => (
+                <option key={s} value={s}>{getStatusStyle(s).label}</option>
               ))}
             </select>
           </div>
@@ -311,13 +329,10 @@ export default function EmployerApplicationDetailPage() {
             {app.employerScore != null ? (
               <div className="flex items-center gap-4">
                 <div
-                  className={`flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-full text-2xl font-bold tabular-nums ${
-                    app.employerScore >= 70
-                      ? "bg-success/15 text-success"
-                      : app.employerScore >= 40
-                        ? "bg-accent/15 text-accent"
-                        : "bg-danger/15 text-danger"
-                  }`}
+                  className={cn(
+                    "flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-full text-2xl font-bold tabular-nums",
+                    employerScoreRingClass(app.employerScore),
+                  )}
                 >
                   {app.employerScore}
                 </div>
@@ -377,33 +392,29 @@ export default function EmployerApplicationDetailPage() {
               ))}
             </ol>
           ) : (
-            <Button
-              variant="secondary"
-              onClick={() => void loadInterviewPrep()}
-              disabled={aiLoading}
-            >
-              {aiLoading ? "Загрузка…" : "Сгенерировать вопросы"}
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => void loadInterviewPrep()}
+                disabled={aiLoading}
+              >
+                {aiLoading ? "Загрузка…" : "Сгенерировать вопросы"}
+              </Button>
+              {app.job?.status && app.job.status !== "PUBLISHED" ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Для черновиков вопросы доступны только владельцу вакансии (через этот кабинет).
+                </p>
+              ) : null}
+            </>
           )}
         </Card>
 
         {/* Actions */}
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6 flex flex-wrap items-start gap-3">
           <Link href={`/applications/${appId}/chat`}>
             <Button variant="secondary">Открыть чат</Button>
           </Link>
-          <Button
-            variant="secondary"
-            onClick={() => void createVideoRoom()}
-            disabled={videoLoading}
-          >
-            {videoLoading ? "Создание…" : "Видеоинтервью"}
-          </Button>
-          {videoUrl && (
-            <a href={videoUrl} target="_blank" className="text-sm text-accent hover:underline self-center">
-              Ссылка на комнату ↗
-            </a>
-          )}
+          <EmployerVideoInterview applicationId={appId} status={app.status} />
           {app.status === "OFFER" && (
             <Button
               onClick={() => void createInternship()}

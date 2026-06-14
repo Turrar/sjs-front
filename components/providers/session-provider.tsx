@@ -14,7 +14,7 @@ import {
   setStoredTokens,
 } from "@/lib/auth-storage";
 import { routes } from "@/lib/api-routes";
-import { fetchWithAuth, postAuthJson } from "@/lib/session-api";
+import { fetchWithAuth, fetchBlobWithAuth, postAuthJson } from "@/lib/session-api";
 import type { AuthTokens, UserMe, UserRole } from "@/lib/types";
 
 type SessionContextValue = {
@@ -30,6 +30,7 @@ type SessionContextValue = {
     post: <T>(path: string, body?: unknown) => Promise<T>;
     patch: <T>(path: string, body?: unknown) => Promise<T>;
     delete: (path: string) => Promise<void>;
+    getBlob: (path: string) => Promise<Blob>;
   };
 };
 
@@ -207,6 +208,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         }),
       delete: (path: string) =>
         fetchWithAuth<void>(ctx, path, { method: "DELETE" }),
+      getBlob: (path: string) => fetchBlobWithAuth(ctx, path, { method: "GET" }),
     }),
     [ctx],
   );

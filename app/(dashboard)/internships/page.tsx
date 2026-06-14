@@ -4,22 +4,18 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
+import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
 import type { Internship } from "@/lib/types";
+import { getInternshipStatus } from "@/lib/internship-display";
 import { Button } from "@/components/ui/button";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
-
-const internshipStatusLabels: Record<string, { label: string; className: string }> = {
-  ACTIVE: { label: "Активна", className: "bg-accent/10 text-accent" },
-  COMPLETED: { label: "Завершена", className: "bg-success/10 text-success" },
-  CANCELLED: { label: "Отменена", className: "bg-muted/70 text-muted-foreground" },
-};
 
 export default function InternshipsPage() {
   const { api } = useSession();
@@ -45,6 +41,7 @@ export default function InternshipsPage() {
   }, [load]);
 
   return (
+    <RoleGuard allow={["STUDENT"]}>
     <PageContainer>
       <PageHeader
         title="Стажировки"
@@ -58,11 +55,11 @@ export default function InternshipsPage() {
       ) : null}
 
       {loading ? (
-        <LoadingHint />
+        <SimpleListSkeleton count={4} />
       ) : internships.length === 0 ? (
         <EmptyState
           title="Нет стажировок"
-          description="Когда работодатель переведёт отклик в статус HIRED, здесь появится трекер стажировки."
+          description="Когда работодатель переведёт отклик в статус «Оффер» и откроет стажировку, здесь появится трекер."
         >
           <Link href="/applications">
             <Button variant="secondary">Мои отклики</Button>
@@ -71,9 +68,7 @@ export default function InternshipsPage() {
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
           {internships.map((intern) => {
-            const st =
-              internshipStatusLabels[intern.status] ??
-              internshipStatusLabels.ACTIVE;
+            const st = getInternshipStatus(intern.status);
             const tasksTotal = intern.tasks?.length ?? 0;
             const tasksDone =
               intern.tasks?.filter((t) => t.status === "DONE").length ?? 0;
@@ -133,5 +128,6 @@ export default function InternshipsPage() {
         </ul>
       )}
     </PageContainer>
+    </RoleGuard>
   );
 }

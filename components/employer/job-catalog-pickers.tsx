@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import type { City, JobCategory, Tag } from "@/lib/types";
+import { categoryTreeLabel, cityDisplayName } from "@/lib/job-display";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/cn";
 
@@ -10,9 +11,7 @@ const pickerListClass =
   "max-h-[min(280px,40vh)] overflow-y-auto rounded-xl border border-border bg-card p-2 shadow-sm";
 
 function categoryLabel(c: JobCategory, all: JobCategory[]): string {
-  if (!c.parentId) return c.name;
-  const p = all.find((x) => x.id === c.parentId);
-  return p ? `${p.name} — ${c.name}` : c.name;
+  return categoryTreeLabel(c, all);
 }
 
 function filterByName<T extends { name: string }>(items: T[], q: string): T[] {
@@ -47,7 +46,7 @@ export function JobFormCityPicker({ cities, cityId, onCityId }: CityPickerProps)
 
       {selected ? (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2.5">
-          <span className="text-sm font-medium text-foreground">{selected.name}</span>
+          <span className="text-sm font-medium text-foreground">{cityDisplayName(selected)}</span>
           <button
             type="button"
             onClick={() => {
@@ -86,7 +85,7 @@ export function JobFormCityPicker({ cities, cityId, onCityId }: CityPickerProps)
                       }}
                       className="flex w-full items-center rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/80"
                     >
-                      {c.name}
+                      {cityDisplayName(c)}
                     </button>
                   </li>
                 ))}

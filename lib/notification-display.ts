@@ -1,8 +1,10 @@
 import type { Notification, UserRole } from "@/lib/types";
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === "object" && x !== null;
-}
+import {
+  getPayloadRecord,
+  isWithdrawNotification,
+  isVideoRoomNotification,
+  parseJobAlertPayload,
+} from "@/lib/notification-payload";
 
 function str(p: Record<string, unknown>, key: string): string | undefined {
   const v = p[key];
@@ -27,6 +29,7 @@ const KIND_TITLE: Record<string, string> = {
   APPLICATION_UPDATE: "Отклик",
   CHAT_MESSAGE: "Сообщение в чате",
   SCHEDULE_READY: "Расписание",
+  JOB_ALERT: "Подписка на вакансии",
   SYSTEM: "Системное",
 };
 
@@ -46,10 +49,10 @@ export function getNotificationPresentation(
   n: Notification,
   role: UserRole | undefined,
 ): NotificationPresentation {
-  const payload = n.payload;
+  const payload = getPayloadRecord(n);
   const kindTitle = KIND_TITLE[n.kind] ?? "Уведомление";
 
-  if (!payload || !isRecord(payload)) {
+  if (!payload) {
     return {
       title: kindTitle,
       body:
@@ -64,16 +67,71 @@ export function getNotificationPresentation(
     const jobId = str(payload, "jobId");
     const message = str(payload, "message");
     const status = str(payload, "status");
+    const jobTitle = str(payload, "jobTitle");
+
+    if (isVideoRoomNotification(n) && applicationId && role === "STUDENT") {
+      return {
+        title: "Видеоинтервью",
+        body: "Работодатель открыл видеосозвон — можно присоединиться.",
+        action: {
+          href: `/applications/${applicationId}`,
+          label: "К отклику",
+        },
+      };
+    }
+
+    if (isWithdrawNotification(n) && role === "EMPLOYER") {
+      const vacancy = jobTitle ? ` «${jobTitle}»` : "";
+      return {
+        title: "Отзыв отклика",
+        body: `Студент отозвал отклик${vacancy}.`,
+        action: applicationId
+          ? {
+              href: `/employer/applications/${applicationId}`,
+              label: "К отклику",
+            }
+          : jobId
+            ? {
+                href: `/employer/jobs/${jobId}/applications`,
+                label: "К откликам",
+              }
+            : undefined,
+      };
+    }
 
     if (message && jobId && applicationId && role === "EMPLOYER") {
       const isNewApplication =
         message === "New application received" ||
         message.toLowerCase().includes("application received");
+      const vacancy = jobTitle ? ` «${jobTitle}»` : "";
       return {
         title: isNewApplication ? "Новый отклик" : "Событие по отклику",
         body: isNewApplication
-          ? "Студент откликнулся на вашу вакансию."
+          ? `Студент откликнулся на вашу вакансию${vacancy}.`
           : message,
+        action: {
+          href: `/employer/jobs/${jobId}/applications`,
+          label: "К откликам",
+        },
+      };
+    }
+
+    if (status && applicationId && jobId) {
+      const st = statusLabel(status);
+      const vacancy = jobTitle ? ` по «${jobTitle}»` : "";
+      if (role === "STUDENT") {
+        return {
+          title: "Статус отклика",
+          body: `Работодатель обновил статус${vacancy}: ${st}.`,
+          action: {
+            href: `/applications/${applicationId}`,
+            label: "К отклику",
+          },
+        };
+      }
+      return {
+        title: "Обновление по отклику",
+        body: `Статус${vacancy}: ${st}.`,
         action: {
           href: `/employer/jobs/${jobId}/applications`,
           label: "К откликам",
@@ -88,28 +146,6 @@ export function getNotificationPresentation(
         action: {
           href: `/applications/${applicationId}/chat`,
           label: "Открыть чат",
-        },
-      };
-    }
-
-    if (status && applicationId && jobId) {
-      const st = statusLabel(status);
-      if (role === "STUDENT") {
-        return {
-          title: "Статус отклика",
-          body: `Работодатель обновил статус: ${st}.`,
-          action: {
-            href: `/applications/${applicationId}/chat`,
-            label: "Открыть чат",
-          },
-        };
-      }
-      return {
-        title: "Обновление по отклику",
-        body: `Статус: ${st}.`,
-        action: {
-          href: `/employer/jobs/${jobId}/applications`,
-          label: "К откликам",
         },
       };
     }
@@ -139,6 +175,30 @@ export function getNotificationPresentation(
             label: "Открыть чат",
           }
         : undefined,
+    };
+  }
+
+  if (n.kind === "JOB_ALERT") {
+    const parsed = parseJobAlertPayload(payload);
+    const count = parsed?.count ?? 0;
+    const titles = (parsed?.jobs ?? [])
+      .slice(0, 3)
+      .map((j) => j.title)
+      .join(", ");
+    const suffix =
+      parsed && parsed.jobs.length > 3
+        ? ` и ещё ${parsed.jobs.length - 3}`
+        : "";
+    return {
+      title: "Новые вакансии по подписке",
+      body:
+        count > 0
+          ? `Найдено ${count} новых вакансий${titles ? `: ${titles}${suffix}` : ""}.`
+          : "Появились новые вакансии по вашей подписке.",
+      action:
+        role === "STUDENT"
+          ? { href: "/dashboard/jobs", label: "Смотреть вакансии" }
+          : undefined,
     };
   }
 

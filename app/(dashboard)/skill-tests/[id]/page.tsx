@@ -10,7 +10,8 @@ import { useSession } from "@/components/providers/session-provider";
 import type { SkillTestSubmitResult, SkillTestWithQuestions } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer } from "@/components/layout/page";
+import { PageContainer } from "@/components/layout/page";
+import { FormSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 export default function SkillTestPage() {
@@ -85,7 +86,7 @@ export default function SkillTestPage() {
         </div>
 
         {loading ? (
-          <LoadingHint />
+          <FormSkeleton fields={6} />
         ) : error ? (
           <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {error}

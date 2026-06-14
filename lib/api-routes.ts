@@ -13,6 +13,10 @@ export const routes = {
   users: {
     me: "/users/me",
   },
+  telegram: {
+    /** POST — JWT STUDENT/EMPLOYER; webhook /telegram/webhook вызывает только Telegram */
+    linkToken: "/telegram/link-token",
+  },
   jobs: {
     list: "/jobs",
     recommended: "/jobs/recommended",
@@ -22,8 +26,18 @@ export const routes = {
   applications: {
     create: "/applications",
     mine: "/applications/me",
-    byJob: (jobId: string) => `/applications/job/${jobId}`,
+    byId: (id: string) => `/applications/${id}`,
+    byJob: (jobId: string, status?: string) => {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      const qs = params.toString();
+      return qs
+        ? `/applications/job/${jobId}?${qs}`
+        : `/applications/job/${jobId}`;
+    },
     patchStatus: (id: string) => `/applications/${id}/status`,
+    /** PATCH без body — только STUDENT, из SUBMITTED|REVIEWING|SHORTLISTED|INTERVIEW */
+    withdraw: (id: string) => `/applications/${id}/withdraw`,
   },
   chat: {
     messages: (applicationId: string) =>
@@ -31,6 +45,7 @@ export const routes = {
   },
   notifications: {
     list: "/notifications",
+    unreadCount: "/notifications/unread-count",
     markRead: (id: string) => `/notifications/${id}/read`,
   },
   schedule: {
@@ -47,7 +62,7 @@ export const routes = {
     draftById: (id: string) => `/resume/drafts/${id}`,
     suggestions: (id: string) => `/resume/drafts/${id}/suggestions`,
   },
-  /** POST: тело { filename, contentType } → { uploadUrl, storageKey, expiresIn } */
+  /** POST — JWT; тело filename + contentType → uploadUrl, storageKey (логотип, аватар, резюме) */
   upload: {
     presign: "/upload/presign",
   },
@@ -56,10 +71,25 @@ export const routes = {
     employerMe: "/analytics/employer/me",
   },
   admin: {
-    users: (page: number, limit: number) =>
-      `/admin/users?page=${page}&limit=${limit}`,
+    users: (page: number, limit: number, role?: string) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+      });
+      if (role) params.set("role", role);
+      return `/admin/users?${params}`;
+    },
+    jobs: (page: number, limit: number, status?: string) => {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: String(limit),
+      });
+      if (status) params.set("status", status);
+      return `/admin/jobs?${params}`;
+    },
     employerVerification: (userId: string) =>
       `/admin/employers/${userId}/verification`,
+    userStatus: (userId: string) => `/admin/users/${userId}/status`,
     moderateJob: (jobId: string) => `/admin/jobs/${jobId}/moderate`,
     /** POST /admin/hh-import?text=...&area=... */
     hhImport: (text?: string, area?: string) => {
@@ -75,6 +105,7 @@ export const routes = {
     coverLetter: "/ai/cover-letter",
     interviewPrep: "/ai/interview-prep",
   },
+  health: "/health",
   /** Публичные списки справочников (таблицы на /admin/catalog) */
   catalog: {
     cities: "/cities",
@@ -102,7 +133,7 @@ export const routes = {
   },
   internships: {
     mine: "/internships/mine",
-    create: "/internships",
+    open: "/internships/open",
     byId: (id: string) => `/internships/${id}`,
     createTask: (id: string) => `/internships/${id}/tasks`,
     complete: (id: string) => `/internships/${id}/complete`,
@@ -112,19 +143,27 @@ export const routes = {
   },
   payments: {
     kaspiPremium: (jobId: string) => `/payments/kaspi/premium/${jobId}`,
+    kaspiPremiumStatus: (jobId: string) =>
+      `/payments/kaspi/premium/${jobId}/status`,
+  },
+  media: {
+    url: (storageKey: string) =>
+      `/media/url?storageKey=${encodeURIComponent(storageKey)}`,
   },
   profiles: {
     byUserId: (userId: string) => `/profiles/${userId}`,
+    employer: (userId: string) => `/profiles/employer/${userId}`,
   },
   reviews: {
     create: "/reviews",
+    me: "/reviews/me",
     byEmployer: (employerUserId: string) => `/reviews/employer/${employerUserId}`,
   },
   calendar: {
     ics: "/calendar/schedule.ics",
   },
   video: {
-    createRoom: (applicationId: string) => `/video/rooms/${applicationId}`,
+    room: (applicationId: string) => `/video/rooms/${applicationId}`,
   },
   /** Админские CRUD справочников (GET возвращает ВСЕ, включая неактивные) */
   adminCatalog: {

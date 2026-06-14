@@ -26,14 +26,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
-
-const selectClass =
-  "rounded-xl border border-border bg-card px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/25";
+import { selectClass } from "@/lib/select-class";
+import { buildNameI18n, parseNameI18n } from "@/lib/name-i18n";
+import { StorageImageThumb } from "@/components/ui/storage-image-thumb";
+import { NameI18nFields } from "@/components/admin/name-i18n-fields";
 
 function parseList<T>(raw: unknown): T[] {
   if (Array.isArray(raw)) return raw as T[];
@@ -139,7 +140,7 @@ export default function AdminCatalogPage() {
         </div>
 
         {listLoading ? (
-          <LoadingHint />
+          <TableSkeleton rows={6} cols={4} />
         ) : (
           <>
             {tab === "cities" ? (
@@ -200,6 +201,9 @@ function CitiesBlock({
   setEditCity: (c: City | null) => void;
 }) {
   const [name, setName] = useState("");
+  const [nameRu, setNameRu] = useState("");
+  const [nameKk, setNameKk] = useState("");
+  const [nameEn, setNameEn] = useState("");
   const [slug, setSlug] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
   const [isActive, setIsActive] = useState(true);
@@ -207,6 +211,9 @@ function CitiesBlock({
   const [formError, setFormError] = useState<string | null>(null);
 
   const [eName, setEName] = useState("");
+  const [eNameRu, setENameRu] = useState("");
+  const [eNameKk, setENameKk] = useState("");
+  const [eNameEn, setENameEn] = useState("");
   const [eSlug, setESlug] = useState("");
   const [eSort, setESort] = useState("0");
   const [eActive, setEActive] = useState(true);
@@ -216,6 +223,10 @@ function CitiesBlock({
   useEffect(() => {
     if (editCity) {
       setEName(editCity.name);
+      const i18n = parseNameI18n(editCity.nameI18n);
+      setENameRu(i18n.ru);
+      setENameKk(i18n.kk);
+      setENameEn(i18n.en);
       setESlug(editCity.slug ?? "");
       setESort(String(editCity.sortOrder ?? 0));
       setEActive(editCity.isActive);
@@ -235,12 +246,16 @@ function CitiesBlock({
       if (file) imageStorageKey = await uploadFileViaPresign(api, file);
       await api.post<City>(routes.adminCatalog.cities, {
         name: n,
+        nameI18n: buildNameI18n({ ru: nameRu, kk: nameKk, en: nameEn }),
         slug: slug.trim() || undefined,
         sortOrder: Math.max(0, parseInt(sortOrder, 10) || 0),
         isActive,
         ...(imageStorageKey ? { imageStorageKey } : {}),
       });
       setName("");
+      setNameRu("");
+      setNameKk("");
+      setNameEn("");
       setSlug("");
       setSortOrder("0");
       setIsActive(true);
@@ -256,11 +271,13 @@ function CitiesBlock({
   async function saveEdit() {
     if (!editCity) return;
     setBusy(true);
+    setFormError(null);
     try {
       let imageStorageKey: string | undefined;
       if (eFile) imageStorageKey = await uploadFileViaPresign(api, eFile);
       const body: Record<string, unknown> = {
         name: eName.trim(),
+        nameI18n: buildNameI18n({ ru: eNameRu, kk: eNameKk, en: eNameEn }),
         sortOrder: Math.max(0, parseInt(eSort, 10) || 0),
         isActive: eActive,
       };
@@ -271,7 +288,7 @@ function CitiesBlock({
       setEditCity(null);
       await onRefresh();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Ошибка");
+      setFormError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
@@ -279,12 +296,13 @@ function CitiesBlock({
 
   async function removeCity(c: City) {
     if (!confirm(`Удалить город «${c.name}»?`)) return;
+    setFormError(null);
     setBusy(true);
     try {
       await api.delete(routes.adminCatalog.cityById(c.id));
       await onRefresh();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Ошибка");
+      setFormError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
@@ -298,8 +316,7 @@ function CitiesBlock({
           Новый город
         </CardTitle>
         <CardDescription className="mb-6">
-          POST {routes.adminCatalog.cities} — при необходимости выберите файл (presign →
-          S3). Список: GET {routes.catalog.cities}.
+          Добавьте город в справочник. Можно загрузить изображение и локализованные названия.
         </CardDescription>
         <form
           className="grid gap-4 md:grid-cols-2"
@@ -316,6 +333,14 @@ function CitiesBlock({
             label="Slug (опционально)"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
+          />
+          <NameI18nFields
+            ru={nameRu}
+            kk={nameKk}
+            en={nameEn}
+            onRu={setNameRu}
+            onKk={setNameKk}
+            onEn={setNameEn}
           />
           <Input
             label="Порядок сортировки"
@@ -383,6 +408,14 @@ function CitiesBlock({
               onChange={(e) => setESlug(e.target.value)}
               disabled={resetSlug}
             />
+            <NameI18nFields
+              ru={eNameRu}
+              kk={eNameKk}
+              en={eNameEn}
+              onRu={setENameRu}
+              onKk={setENameKk}
+              onEn={setENameEn}
+            />
             <label className="flex cursor-pointer items-center gap-2 text-sm md:col-span-2">
               <input
                 type="checkbox"
@@ -446,7 +479,7 @@ function CitiesBlock({
               <th className="p-3 font-semibold">Slug</th>
               <th className="p-3 font-semibold">Порядок</th>
               <th className="p-3 font-semibold">Активен</th>
-              <th className="p-3 font-semibold">Ключ изображения</th>
+              <th className="p-3 font-semibold">Изображение</th>
               <th className="p-3 font-semibold" />
             </tr>
           </thead>
@@ -456,12 +489,17 @@ function CitiesBlock({
                 key={c.id}
                 className="border-t border-border/80 hover:bg-muted/20"
               >
-                <td className="p-3">{c.name}</td>
+                <td className="p-3">
+                  <div>{c.name}</div>
+                  {c.nameI18n?.kk ? (
+                    <div className="text-xs text-muted-foreground">{c.nameI18n.kk}</div>
+                  ) : null}
+                </td>
                 <td className="p-3 text-muted-foreground">{c.slug ?? "—"}</td>
                 <td className="p-3">{c.sortOrder}</td>
                 <td className="p-3">{c.isActive ? "да" : "нет"}</td>
-                <td className="max-w-[200px] truncate p-3 text-xs text-muted-foreground">
-                  {c.imageStorageKey ?? "—"}
+                <td className="p-3">
+                  <StorageImageThumb imageUrl={c.imageUrl} storageKey={c.imageStorageKey} alt={c.name} ownedOnly={false} />
                 </td>
                 <td className="p-3">
                   <div className="flex gap-1">
@@ -512,6 +550,9 @@ function CategoriesBlock({
   setEditCategory: (c: JobCategory | null) => void;
 }) {
   const [name, setName] = useState("");
+  const [nameRu, setNameRu] = useState("");
+  const [nameKk, setNameKk] = useState("");
+  const [nameEn, setNameEn] = useState("");
   const [slug, setSlug] = useState("");
   const [parentId, setParentId] = useState("");
   const [sortOrder, setSortOrder] = useState("0");
@@ -520,6 +561,9 @@ function CategoriesBlock({
   const [formError, setFormError] = useState<string | null>(null);
 
   const [eName, setEName] = useState("");
+  const [eNameRu, setENameRu] = useState("");
+  const [eNameKk, setENameKk] = useState("");
+  const [eNameEn, setENameEn] = useState("");
   const [eSlug, setESlug] = useState("");
   const [eParent, setEParent] = useState("");
   const [eSort, setESort] = useState("0");
@@ -530,6 +574,10 @@ function CategoriesBlock({
   useEffect(() => {
     if (editCategory) {
       setEName(editCategory.name);
+      const i18n = parseNameI18n(editCategory.nameI18n);
+      setENameRu(i18n.ru);
+      setENameKk(i18n.kk);
+      setENameEn(i18n.en);
       setESlug(editCategory.slug ?? "");
       setEParent(editCategory.parentId ?? "");
       setESort(String(editCategory.sortOrder ?? 0));
@@ -554,6 +602,7 @@ function CategoriesBlock({
       if (file) imageStorageKey = await uploadFileViaPresign(api, file);
       await api.post<JobCategory>(routes.adminCatalog.jobCategories, {
         name: n,
+        nameI18n: buildNameI18n({ ru: nameRu, kk: nameKk, en: nameEn }),
         slug: slug.trim() || undefined,
         parentId: parentId.trim() || undefined,
         sortOrder: Math.max(0, parseInt(sortOrder, 10) || 0),
@@ -561,6 +610,9 @@ function CategoriesBlock({
         ...(imageStorageKey ? { imageStorageKey } : {}),
       });
       setName("");
+      setNameRu("");
+      setNameKk("");
+      setNameEn("");
       setSlug("");
       setParentId("");
       setSortOrder("0");
@@ -577,11 +629,13 @@ function CategoriesBlock({
   async function saveEdit() {
     if (!editCategory) return;
     setBusy(true);
+    setFormError(null);
     try {
       let imageStorageKey: string | undefined;
       if (eFile) imageStorageKey = await uploadFileViaPresign(api, eFile);
       const body: Record<string, unknown> = {
         name: eName.trim(),
+        nameI18n: buildNameI18n({ ru: eNameRu, kk: eNameKk, en: eNameEn }),
         sortOrder: Math.max(0, parseInt(eSort, 10) || 0),
         isActive: eActive,
       };
@@ -596,7 +650,7 @@ function CategoriesBlock({
       setEditCategory(null);
       await onRefresh();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Ошибка");
+      setFormError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
@@ -604,12 +658,13 @@ function CategoriesBlock({
 
   async function removeCat(c: JobCategory) {
     if (!confirm(`Удалить категорию «${c.name}»?`)) return;
+    setFormError(null);
     setBusy(true);
     try {
       await api.delete(routes.adminCatalog.jobCategoryById(c.id));
       await onRefresh();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Ошибка");
+      setFormError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
@@ -623,7 +678,7 @@ function CategoriesBlock({
           Новая категория
         </CardTitle>
         <CardDescription className="mb-6">
-          POST {routes.adminCatalog.jobCategories} · GET {routes.catalog.jobCategories}
+          Добавьте категорию в справочник. Можно указать родителя, изображение и локализованные названия.
         </CardDescription>
         <form className="grid gap-4 md:grid-cols-2" onSubmit={(e) => void createCat(e)}>
           <Input
@@ -637,6 +692,14 @@ function CategoriesBlock({
             label="Slug (опционально)"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
+          />
+          <NameI18nFields
+            ru={nameRu}
+            kk={nameKk}
+            en={nameEn}
+            onRu={setNameRu}
+            onKk={setNameKk}
+            onEn={setNameEn}
           />
           <div className="flex flex-col gap-2 md:col-span-2">
             <span className="text-sm font-medium">Родительская категория</span>
@@ -706,6 +769,14 @@ function CategoriesBlock({
               value={eSlug}
               onChange={(e) => setESlug(e.target.value)}
               disabled={resetSlug}
+            />
+            <NameI18nFields
+              ru={eNameRu}
+              kk={eNameKk}
+              en={eNameEn}
+              onRu={setENameRu}
+              onKk={setENameKk}
+              onEn={setENameEn}
             />
             <label className="flex cursor-pointer items-center gap-2 text-sm md:col-span-2">
               <input
@@ -780,7 +851,8 @@ function CategoriesBlock({
               <th className="p-3 font-semibold">Родитель</th>
               <th className="p-3 font-semibold">Порядок</th>
               <th className="p-3 font-semibold">Активна</th>
-              <th className="p-3" />
+              <th className="p-3 font-semibold">Изображение</th>
+              <th className="p-3 font-semibold" />
             </tr>
           </thead>
           <tbody>
@@ -791,7 +863,12 @@ function CategoriesBlock({
                   key={c.id}
                   className="border-t border-border/80 hover:bg-muted/20"
                 >
-                  <td className="p-3">{c.name}</td>
+                  <td className="p-3">
+                    <div>{c.name}</div>
+                    {c.nameI18n?.kk ? (
+                      <div className="text-xs text-muted-foreground">{c.nameI18n.kk}</div>
+                    ) : null}
+                  </td>
                   <td className="p-3 text-muted-foreground">
                     {c.slug ?? "—"}
                   </td>
@@ -800,6 +877,9 @@ function CategoriesBlock({
                   </td>
                   <td className="p-3">{c.sortOrder}</td>
                   <td className="p-3">{c.isActive ? "да" : "нет"}</td>
+                  <td className="p-3">
+                    <StorageImageThumb imageUrl={c.imageUrl} storageKey={c.imageStorageKey} alt={c.name} ownedOnly={false} />
+                  </td>
                   <td className="p-3">
                     <div className="flex gap-1">
                       <Button
@@ -850,11 +930,17 @@ function TagsBlock({
   setEditTag: (t: Tag | null) => void;
 }) {
   const [name, setName] = useState("");
+  const [nameRu, setNameRu] = useState("");
+  const [nameKk, setNameKk] = useState("");
+  const [nameEn, setNameEn] = useState("");
   const [slug, setSlug] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [eName, setEName] = useState("");
+  const [eNameRu, setENameRu] = useState("");
+  const [eNameKk, setENameKk] = useState("");
+  const [eNameEn, setENameEn] = useState("");
   const [eSlug, setESlug] = useState("");
   const [eActive, setEActive] = useState(true);
   const [resetSlug, setResetSlug] = useState(false);
@@ -862,6 +948,10 @@ function TagsBlock({
   useEffect(() => {
     if (editTag) {
       setEName(editTag.name);
+      const i18n = parseNameI18n(editTag.nameI18n);
+      setENameRu(i18n.ru);
+      setENameKk(i18n.kk);
+      setENameEn(i18n.en);
       setESlug(editTag.slug ?? "");
       setEActive(editTag.isActive);
       setResetSlug(false);
@@ -877,10 +967,14 @@ function TagsBlock({
     try {
       await api.post<Tag>(routes.adminCatalog.tags, {
         name: n,
+        nameI18n: buildNameI18n({ ru: nameRu, kk: nameKk, en: nameEn }),
         slug: slug.trim() || undefined,
         isActive,
       });
       setName("");
+      setNameRu("");
+      setNameKk("");
+      setNameEn("");
       setSlug("");
       setIsActive(true);
       await onRefresh();
@@ -894,9 +988,11 @@ function TagsBlock({
   async function saveEdit() {
     if (!editTag) return;
     setBusy(true);
+    setFormError(null);
     try {
       const body: Record<string, unknown> = {
         name: eName.trim(),
+        nameI18n: buildNameI18n({ ru: eNameRu, kk: eNameKk, en: eNameEn }),
         isActive: eActive,
       };
       if (resetSlug) body.slug = null;
@@ -905,7 +1001,7 @@ function TagsBlock({
       setEditTag(null);
       await onRefresh();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Ошибка");
+      setFormError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
@@ -913,12 +1009,13 @@ function TagsBlock({
 
   async function removeTag(t: Tag) {
     if (!confirm(`Удалить тег «${t.name}»?`)) return;
+    setFormError(null);
     setBusy(true);
     try {
       await api.delete(routes.adminCatalog.tagById(t.id));
       await onRefresh();
     } catch (err) {
-      alert(err instanceof ApiError ? err.message : "Ошибка");
+      setFormError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
       setBusy(false);
     }
@@ -932,7 +1029,7 @@ function TagsBlock({
           Новый тег
         </CardTitle>
         <CardDescription className="mb-6">
-          POST {routes.adminCatalog.tags} · GET {routes.catalog.tags}
+          Добавьте тег в справочник. Можно указать локализованные названия.
         </CardDescription>
         <form
           className="grid gap-4 md:grid-cols-2"
@@ -949,6 +1046,14 @@ function TagsBlock({
             label="Slug (опционально)"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
+          />
+          <NameI18nFields
+            ru={nameRu}
+            kk={nameKk}
+            en={nameEn}
+            onRu={setNameRu}
+            onKk={setNameKk}
+            onEn={setNameEn}
           />
           <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border/80 bg-muted/40 px-4 py-3 text-sm md:col-span-2">
             <input
@@ -988,6 +1093,14 @@ function TagsBlock({
               value={eSlug}
               onChange={(e) => setESlug(e.target.value)}
               disabled={resetSlug}
+            />
+            <NameI18nFields
+              ru={eNameRu}
+              kk={eNameKk}
+              en={eNameEn}
+              onRu={setENameRu}
+              onKk={setENameKk}
+              onEn={setENameEn}
             />
             <label className="flex cursor-pointer items-center gap-2 text-sm md:col-span-2">
               <input
@@ -1038,7 +1151,12 @@ function TagsBlock({
                 key={t.id}
                 className="border-t border-border/80 hover:bg-muted/20"
               >
-                <td className="p-3">{t.name}</td>
+                <td className="p-3">
+                  <div>{t.name}</div>
+                  {t.nameI18n?.kk ? (
+                    <div className="text-xs text-muted-foreground">{t.nameI18n.kk}</div>
+                  ) : null}
+                </td>
                 <td className="p-3 text-muted-foreground">{t.slug ?? "—"}</td>
                 <td className="p-3">{t.isActive ? "да" : "нет"}</td>
                 <td className="p-3">

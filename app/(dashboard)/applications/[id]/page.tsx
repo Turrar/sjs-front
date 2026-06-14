@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
@@ -9,20 +9,112 @@ import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
 import type {
   Application,
+  ApplicationStatus,
   CoverLetterResponse,
   InterviewPrepResponse,
 } from "@/lib/types";
 import { jobLocationLine, salaryLine } from "@/lib/job-display";
-import { applicationStatusOrder, getStatusStyle } from "@/lib/application-display";
+import {
+  applicationStatusOrder,
+  canStudentWithdraw,
+  getStatusStyle,
+  isTerminalApplicationStatus,
+} from "@/lib/application-display";
+import { StudentVideoInterview } from "@/components/applications/video-interview-actions";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer } from "@/components/layout/page";
+import { Card } from "@/components/ui/card";
+import { PageContainer } from "@/components/layout/page";
+import { DetailPageSkeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/providers/toast-provider";
+import { interviewPrepPath } from "@/lib/kaspi-payment";
 import { cn } from "@/lib/cn";
 
-type VideoRoom = { name: string; url: string; expiresAt: string };
+function JobMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-muted/25 px-3 py-2.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-0.5 text-sm font-medium text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function ApplicationStatusStepper({
+  status,
+}: {
+  status: ApplicationStatus;
+}) {
+  const statusIdx = applicationStatusOrder.indexOf(status);
+  const terminal = isTerminalApplicationStatus(status);
+  const terminalStyle = getStatusStyle(status);
+
+  if (terminal) {
+    return (
+      <span
+        className={cn(
+          "inline-flex rounded-full px-3 py-1.5 text-sm font-medium",
+          terminalStyle.className,
+        )}
+      >
+        {terminalStyle.label}
+      </span>
+    );
+  }
+
+  return (
+    <ol className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-0">
+      {applicationStatusOrder.map((step, i) => {
+        const st = getStatusStyle(step);
+        const isCurrent = status === step;
+        const isPast = statusIdx !== -1 && i < statusIdx;
+        const isLast = i === applicationStatusOrder.length - 1;
+
+        return (
+          <li key={step} className="flex items-center gap-2 sm:gap-0">
+            <div
+              className={cn(
+                "flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium sm:text-sm",
+                isCurrent
+                  ? cn(st.className, "ring-2 ring-accent/25")
+                  : isPast
+                    ? "bg-success/10 text-success"
+                    : "bg-muted/40 text-muted-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",
+                  isCurrent
+                    ? "bg-accent text-accent-foreground"
+                    : isPast
+                      ? "bg-success/20 text-success"
+                      : "bg-muted text-muted-foreground",
+                )}
+              >
+                {isPast ? "✓" : i + 1}
+              </span>
+              {st.label}
+            </div>
+            {!isLast ? (
+              <span
+                className={cn(
+                  "hidden h-px w-6 sm:block",
+                  isPast ? "bg-success/40" : "bg-border",
+                )}
+                aria-hidden
+              />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export default function ApplicationDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const applicationId = params.id as string;
   const { api, user } = useSession();
 
@@ -32,20 +124,20 @@ export default function ApplicationDetailPage() {
 
   const [aiLoading, setAiLoading] = useState<"cover" | "prep" | null>(null);
   const [coverLetter, setCoverLetter] = useState<string | null>(null);
-  const [interviewQuestions, setInterviewQuestions] = useState<string[] | null>(null);
+  const [interviewQuestions, setInterviewQuestions] = useState<string[] | null>(
+    null,
+  );
   const [aiError, setAiError] = useState<string | null>(null);
 
-  const [videoRoom, setVideoRoom] = useState<VideoRoom | null>(null);
-  const [videoLoading, setVideoLoading] = useState(false);
-  const [videoError, setVideoError] = useState<string | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await api.get<Application[]>(routes.applications.mine);
-      const found = list.find((a) => a.id === applicationId);
-      if (!found) throw new ApiError(404, "/applications/me", "Отклик не найден");
+      const found = await api.get<Application>(routes.applications.byId(applicationId));
       setApp(found);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
@@ -53,6 +145,12 @@ export default function ApplicationDetailPage() {
       setLoading(false);
     }
   }, [api, applicationId]);
+
+  useEffect(() => {
+    if (user?.role === "EMPLOYER") {
+      router.replace(`/employer/applications/${applicationId}`);
+    }
+  }, [user?.role, applicationId, router]);
 
   useEffect(() => {
     void load();
@@ -72,9 +170,7 @@ export default function ApplicationDetailPage() {
       setCoverLetter(res.text);
     } catch (e) {
       setAiError(
-        e instanceof ApiError
-          ? e.message
-          : "AI недоступен — проверьте OPENAI_API_KEY",
+        e instanceof ApiError ? e.message : "Сервис AI временно недоступен",
       );
     } finally {
       setAiLoading(null);
@@ -88,261 +184,231 @@ export default function ApplicationDetailPage() {
     setInterviewQuestions(null);
     try {
       const res = await api.get<InterviewPrepResponse>(
-        `${routes.ai.interviewPrep}?jobId=${app.jobId}&language=ru&count=7`,
+        interviewPrepPath({ jobId: app.jobId, language: "ru", count: 7 }),
       );
       setInterviewQuestions(res.questions);
     } catch (e) {
-      setAiError(
-        e instanceof ApiError
-          ? e.message
-          : "AI недоступен — проверьте OPENAI_API_KEY",
-      );
+      const msg =
+        e instanceof ApiError && e.status === 403
+          ? "Подготовка к интервью доступна только для опубликованных вакансий."
+          : e instanceof ApiError
+            ? e.message
+            : "Сервис AI временно недоступен";
+      setAiError(msg);
     } finally {
       setAiLoading(null);
     }
   }
 
-  async function createVideoRoom() {
-    setVideoLoading(true);
-    setVideoError(null);
+  async function withdrawApplication() {
+    if (!app || !confirm("Отозвать отклик? Это действие нельзя отменить.")) return;
+    setWithdrawing(true);
+    setError(null);
     try {
-      const room = await api.post<VideoRoom>(
-        routes.video.createRoom(applicationId),
+      const updated = await api.patch<Application>(
+        routes.applications.withdraw(app.id),
       );
-      setVideoRoom(room);
+      setApp(updated);
+      toast.success("Отклик отозван");
     } catch (e) {
-      setVideoError(e instanceof ApiError ? e.message : "Ошибка создания комнаты");
+      setError(e instanceof ApiError ? e.message : "Не удалось отозвать отклик");
     } finally {
-      setVideoLoading(false);
+      setWithdrawing(false);
     }
   }
 
-  const statusIdx = app
-    ? applicationStatusOrder.indexOf(app.status as (typeof applicationStatusOrder)[number])
-    : -1;
+  const interviewPrepAvailable = app?.job?.status === "PUBLISHED";
 
   return (
-    <RoleGuard allow={["STUDENT", "EMPLOYER"]}>
-      <PageContainer narrow>
-        <div className="mb-6 flex flex-wrap items-center gap-3 text-sm">
-          <Link
-            href={user?.role === "EMPLOYER" ? "/employer/jobs" : "/applications"}
-            className="font-medium text-muted-foreground transition-colors hover:text-accent"
-          >
-            ← Мои отклики
-          </Link>
-        </div>
+    <RoleGuard allow={["STUDENT"]}>
+      <PageContainer className="py-6 md:py-8">
+        <Link
+          href="/applications"
+          className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-accent"
+        >
+          <span aria-hidden>←</span> Мои отклики
+        </Link>
 
         {loading ? (
-          <LoadingHint />
-        ) : error ? (
+          <DetailPageSkeleton />
+        ) : error && !app ? (
           <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {error}
           </p>
         ) : app ? (
-          <div className="space-y-6">
-            {/* Job info */}
-            <Card>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h1 className="text-xl font-bold tracking-tight text-foreground">
-                    {app.job?.title ?? "Вакансия"}
-                  </h1>
-                  {app.job?.employer?.companyName ? (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {app.job.employer.companyName}
-                    </p>
-                  ) : null}
-                  {app.job ? (
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-                      {jobLocationLine(app.job) ? (
-                        <span className="rounded-md bg-muted/70 px-2 py-0.5">
-                          {jobLocationLine(app.job)}
-                        </span>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-w-0 space-y-6">
+              <Card>
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div>
+                      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                        {app.job?.title ?? "Вакансия"}
+                      </h1>
+                      {app.job?.employer?.companyName ? (
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {app.job.employer.companyName}
+                        </p>
                       ) : null}
-                      {salaryLine(app.job) ? (
-                        <span className="rounded-md bg-muted/70 px-2 py-0.5">
-                          {salaryLine(app.job)}
-                        </span>
-                      ) : null}
+                    </div>
+                    {app.job ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <JobMetric
+                          label="Локация"
+                          value={jobLocationLine(app.job) ?? "Не указана"}
+                        />
+                        <JobMetric
+                          label="Зарплата"
+                          value={salaryLine(app.job) ?? "По договорённости"}
+                        />
+                      </div>
+                    ) : null}
+                    {app.jobId ? (
+                      <Link
+                        href={`/dashboard/jobs/${app.jobId}`}
+                        className="inline-block text-sm font-medium text-accent hover:underline"
+                      >
+                        Открыть вакансию →
+                      </Link>
+                    ) : null}
+                  </div>
+                  {app.employerScore != null ? (
+                    <div className="shrink-0 rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-center">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        AI-оценка
+                      </p>
+                      <p
+                        className={cn(
+                          "mt-1 text-2xl font-bold tabular-nums",
+                          app.employerScore >= 70
+                            ? "text-success"
+                            : app.employerScore >= 40
+                              ? "text-accent"
+                              : "text-muted-foreground",
+                        )}
+                      >
+                        {app.employerScore}
+                      </p>
                     </div>
                   ) : null}
                 </div>
-                {app.employerScore != null ? (
-                  <div className="flex flex-col items-center gap-1 rounded-2xl border border-border bg-muted/40 px-4 py-3 text-center">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      AI-оценка
-                    </span>
-                    <span
-                      className={cn(
-                        "text-2xl font-bold tabular-nums",
-                        app.employerScore >= 70
-                          ? "text-success"
-                          : app.employerScore >= 40
-                            ? "text-accent"
-                            : "text-muted-foreground",
-                      )}
-                    >
-                      {app.employerScore}
-                    </span>
-                    <span className="text-xs text-muted-foreground">из 100</span>
-                  </div>
-                ) : null}
-              </div>
-            </Card>
-
-            {/* Status pipeline */}
-            <Card>
-              <CardTitle as="h2" className="mb-4 text-sm font-semibold">
-                Статус отклика
-              </CardTitle>
-              <div className="flex flex-wrap gap-2">
-                {applicationStatusOrder.map((s, i) => {
-                  const st = getStatusStyle(s);
-                  const isCurrent = app.status === s;
-                  const isPast = statusIdx !== -1 && i < statusIdx;
-                  return (
-                    <span
-                      key={s}
-                      className={cn(
-                        "rounded-full px-3 py-1 text-xs font-medium transition-all",
-                        isCurrent
-                          ? cn(st.className, "ring-2 ring-offset-1 ring-accent/40")
-                          : isPast
-                            ? "bg-success/10 text-success"
-                            : "bg-muted/50 text-muted-foreground opacity-50",
-                      )}
-                    >
-                      {isCurrent ? "► " : isPast ? "✓ " : ""}
-                      {st.label}
-                    </span>
-                  );
-                })}
-                {app.status === "REJECTED" || app.status === "WITHDRAWN" ? (
-                  <span
-                    className={cn(
-                      "rounded-full px-3 py-1 text-xs font-medium ring-2 ring-offset-1 ring-accent/40",
-                      getStatusStyle(app.status).className,
-                    )}
-                  >
-                    ► {getStatusStyle(app.status).label}
-                  </span>
-                ) : null}
-              </div>
-            </Card>
-
-            {/* Cover letter preview */}
-            {app.coverLetter ? (
-              <Card>
-                <CardTitle as="h2" className="mb-3 text-sm font-semibold">
-                  Ваше сопроводительное письмо
-                </CardTitle>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {app.coverLetter}
-                </p>
               </Card>
-            ) : null}
 
-            {/* Actions */}
-            <Card>
-              <CardTitle as="h2" className="mb-1 text-base">
-                Действия
-              </CardTitle>
-              <CardDescription className="mb-4">
-                Инструменты для подготовки и связи с работодателем.
-              </CardDescription>
-              <div className="flex flex-wrap gap-3">
-                <Link href={`/applications/${app.id}/chat`}>
-                  <Button variant="secondary">Чат с работодателем</Button>
+              <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
+                <h2 className="mb-4 text-base font-semibold text-foreground">
+                  Статус отклика
+                </h2>
+                <ApplicationStatusStepper status={app.status} />
+              </section>
+
+              {app.coverLetter ? (
+                <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
+                  <h2 className="mb-3 text-base font-semibold text-foreground">
+                    Сопроводительное письмо
+                  </h2>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                    {app.coverLetter}
+                  </p>
+                </section>
+              ) : null}
+
+              {aiError ? (
+                <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+                  {aiError}
+                </p>
+              ) : null}
+
+              {coverLetter ? (
+                <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
+                  <h2 className="mb-3 text-base font-semibold text-foreground">
+                    Сгенерированное письмо
+                  </h2>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                    {coverLetter}
+                  </p>
+                  <Button
+                    variant="ghost"
+                    className="mt-4 text-xs"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(coverLetter);
+                      toast.success("Письмо скопировано");
+                      setCopyFeedback("Скопировано");
+                      setTimeout(() => setCopyFeedback(null), 2000);
+                    }}
+                  >
+                    {copyFeedback ?? "Копировать"}
+                  </Button>
+                </section>
+              ) : null}
+
+              {interviewQuestions ? (
+                <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
+                  <h2 className="mb-3 text-base font-semibold text-foreground">
+                    Вопросы для интервью
+                  </h2>
+                  <ol className="space-y-3">
+                    {interviewQuestions.map((q, i) => (
+                      <li key={i} className="flex gap-3 text-sm text-foreground">
+                        <span className="min-w-[1.25rem] font-semibold tabular-nums text-muted-foreground">
+                          {i + 1}.
+                        </span>
+                        <span className="leading-relaxed">{q}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              ) : null}
+
+              {error ? (
+                <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+                  {error}
+                </p>
+              ) : null}
+            </div>
+
+            <aside className="space-y-4 lg:sticky lg:top-20 lg:self-start">
+              <Card className="space-y-3">
+                <h2 className="text-base font-semibold text-foreground">Действия</h2>
+                <Link href={`/applications/${app.id}/chat`} className="block">
+                  <Button variant="secondary" className="w-full">
+                    Чат с работодателем
+                  </Button>
                 </Link>
                 <Button
                   variant="secondary"
+                  className="w-full"
                   disabled={aiLoading === "cover"}
                   onClick={() => void generateCoverLetter()}
                 >
-                  {aiLoading === "cover" ? "Генерация…" : "AI: Cover Letter"}
+                  {aiLoading === "cover" ? "Генерация…" : "AI: письмо"}
                 </Button>
                 <Button
                   variant="secondary"
-                  disabled={aiLoading === "prep"}
+                  className="w-full"
+                  disabled={aiLoading === "prep" || !interviewPrepAvailable}
                   onClick={() => void generateInterviewPrep()}
                 >
-                  {aiLoading === "prep" ? "Генерация…" : "AI: Подготовка к интервью"}
+                  {aiLoading === "prep" ? "Генерация…" : "AI: к интервью"}
                 </Button>
-                {!videoRoom ? (
-                  <Button
-                    variant="secondary"
-                    disabled={videoLoading}
-                    onClick={() => void createVideoRoom()}
-                  >
-                    {videoLoading ? "Создание…" : "Видеоинтервью"}
-                  </Button>
-                ) : (
-                  <a
-                    href={videoRoom.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-xl border border-success/40 bg-success/10 px-4 py-2.5 text-sm font-medium text-success transition-colors hover:bg-success/20"
-                  >
-                    Войти в комнату →
-                  </a>
-                )}
-              </div>
-              {videoError ? (
-                <p className="mt-3 text-sm text-danger">{videoError}</p>
-              ) : null}
-              {videoRoom ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Комната действует до{" "}
-                  {new Date(videoRoom.expiresAt).toLocaleString()}
-                </p>
-              ) : null}
-            </Card>
+                {!interviewPrepAvailable ? (
+                  <p className="text-xs text-muted-foreground">
+                    Подготовка к интервью — когда вакансия опубликована.
+                  </p>
+                ) : null}
+                <StudentVideoInterview applicationId={app.id} status={app.status} />
+              </Card>
 
-            {/* AI results */}
-            {aiError ? (
-              <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-                {aiError}
-              </p>
-            ) : null}
-
-            {coverLetter ? (
-              <Card>
-                <CardTitle as="h2" className="mb-3 text-base">
-                  Сгенерированное письмо
-                </CardTitle>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {coverLetter}
-                </p>
+              {canStudentWithdraw(app.status) ? (
                 <Button
-                  variant="ghost"
-                  className="mt-4 text-xs"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(coverLetter);
-                  }}
+                  variant="danger"
+                  className="w-full"
+                  disabled={withdrawing}
+                  onClick={() => void withdrawApplication()}
                 >
-                  Копировать
+                  {withdrawing ? "Отзыв…" : "Отозвать отклик"}
                 </Button>
-              </Card>
-            ) : null}
-
-            {interviewQuestions ? (
-              <Card>
-                <CardTitle as="h2" className="mb-3 text-base">
-                  Вопросы для подготовки к интервью
-                </CardTitle>
-                <ol className="space-y-3">
-                  {interviewQuestions.map((q, i) => (
-                    <li key={i} className="flex gap-3 text-sm text-foreground">
-                      <span className="min-w-[1.5rem] font-mono font-bold tabular-nums text-muted-foreground">
-                        {i + 1}.
-                      </span>
-                      <span className="leading-relaxed">{q}</span>
-                    </li>
-                  ))}
-                </ol>
-              </Card>
-            ) : null}
+              ) : null}
+            </aside>
           </div>
         ) : null}
       </PageContainer>

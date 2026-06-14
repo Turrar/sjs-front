@@ -9,22 +9,12 @@ import type { EmployerReview, EmployerReviewsResponse } from "@/lib/types";
 import { Card } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 
-function Stars({ rating }: { rating: number }) {
-  return (
-    <span className="flex gap-0.5 text-amber-400">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <span key={n} className="text-base leading-none">
-          {n <= Math.round(rating) ? "★" : "☆"}
-        </span>
-      ))}
-    </span>
-  );
-}
+import { StarRating } from "@/components/ui/star-rating";
 
 function ReviewCard({ review }: { review: EmployerReview }) {
   const name =
@@ -38,7 +28,7 @@ function ReviewCard({ review }: { review: EmployerReview }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Stars rating={review.rating} />
+            <StarRating value={Math.round(review.rating)} readOnly size="sm" />
             <span className="text-sm font-medium text-foreground">{review.rating}/5</span>
           </div>
           <p className="text-sm text-muted-foreground">{name}</p>
@@ -67,7 +57,10 @@ export default function EmployerReviewsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -101,7 +94,7 @@ export default function EmployerReviewsPage() {
         )}
 
         {loading ? (
-          <LoadingHint />
+          <SimpleListSkeleton count={5} />
         ) : data ? (
           <>
             {/* Summary header */}
@@ -110,7 +103,7 @@ export default function EmployerReviewsPage() {
                 <span className="text-5xl font-bold tabular-nums text-foreground">
                   {avgRating > 0 ? avgRating.toFixed(1) : "—"}
                 </span>
-                <Stars rating={avgRating} />
+                <StarRating value={Math.round(avgRating)} readOnly size="sm" />
                 <span className="text-xs text-muted-foreground">средний рейтинг</span>
               </div>
               <div className="text-sm text-muted-foreground">

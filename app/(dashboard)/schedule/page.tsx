@@ -13,10 +13,10 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 import {
   putFileToPresignedUrl,
@@ -297,7 +297,7 @@ function ScheduleSlotTableRow({
 }
 
 export default function SchedulePage() {
-  const { api, accessToken } = useSession();
+  const { api } = useSession();
   const [sources, setSources] = useState<ScheduleSource[]>([]);
   const [slots, setSlots] = useState<ScheduleSlot[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -326,6 +326,29 @@ export default function SchedulePage() {
     void load();
   }, [load]);
 
+  const hasPendingParse = sources.some(
+    (s) => !["DONE", "FAILED", "ERROR"].includes(s.parseStatus),
+  );
+
+  useEffect(() => {
+    if (!hasPendingParse) return;
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          const [s, sl] = await Promise.all([
+            api.get<ScheduleSource[]>(routes.schedule.sources),
+            api.get<ScheduleSlot[]>(routes.schedule.slots),
+          ]);
+          setSources(s);
+          setSlots(sl);
+        } catch {
+          /* ignore poll errors */
+        }
+      })();
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [hasPendingParse, api]);
+
   async function uploadSchedule() {
     if (!file) return;
     setUploading(true);
@@ -352,13 +375,7 @@ export default function SchedulePage() {
 
   async function downloadIcs() {
     try {
-      const base = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api").replace(/\/$/, "");
-      const url = `${base}${routes.calendar.ics}`;
-      const response = await fetch(url, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      });
-      if (!response.ok) throw new Error("Не удалось получить файл");
-      const blob = await response.blob();
+      const blob = await api.getBlob(routes.calendar.ics);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = blobUrl;
@@ -435,10 +452,15 @@ export default function SchedulePage() {
         <Card className="mb-8">
           <CardTitle as="h2">Источники</CardTitle>
           <CardDescription className="mb-4">
-            GET /schedule/sources — статус парсинга (parseStatus).
+            Статус парсинга обновляется автоматически; слоты перезагружаются после завершения.
           </CardDescription>
+          <div className="mb-4 flex justify-end">
+            <Button type="button" variant="secondary" onClick={() => void load()}>
+              Обновить
+            </Button>
+          </div>
           {loading ? (
-            <LoadingHint />
+            <SimpleListSkeleton count={3} />
           ) : sources.length === 0 ? (
             <p className="rounded-xl bg-muted/50 py-8 text-center text-sm text-muted-foreground">
               Пока нет загруженных файлов.
@@ -472,7 +494,7 @@ export default function SchedulePage() {
             можно поправить интервал и сохранить.
           </CardDescription>
           {loading ? (
-            <LoadingHint />
+            <SimpleListSkeleton count={3} />
           ) : slots.length === 0 ? (
             <p className="rounded-xl bg-muted/50 py-8 text-center text-sm text-muted-foreground">
               Слотов пока нет — загрузите расписание или дождитесь парсинга.

@@ -12,10 +12,10 @@ import { getStatusStyle } from "@/lib/application-display";
 import { Button } from "@/components/ui/button";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { ApplicationCardSkeletonList } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 export default function MyApplicationsPage() {
@@ -58,7 +58,7 @@ export default function MyApplicationsPage() {
         ) : null}
 
         {loading ? (
-          <LoadingHint />
+          <ApplicationCardSkeletonList count={4} />
         ) : applications.length === 0 && !error ? (
           <EmptyState
             title="Пока нет откликов"

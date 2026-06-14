@@ -1,9 +1,35 @@
 import { routes } from "@/lib/api-routes";
-import type { PresignResponse } from "@/lib/types";
+import { ApiError } from "@/lib/api-base";
+import type { PresignResponse, UserMe } from "@/lib/types";
 
 export type ApiPost = {
   post: <T>(path: string, body?: unknown) => Promise<T>;
 };
+
+export type ApiPatch = {
+  patch: <T>(path: string, body?: unknown) => Promise<T>;
+};
+
+export type ApiPresignClient = ApiPost & ApiPatch;
+
+export const LOGO_CONTENT_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const;
+
+export function validateLogoFile(file: File): string | null {
+  if (!file.name || file.name.length > 255) {
+    return "Имя файла должно быть от 1 до 255 символов.";
+  }
+  const type = file.type || "";
+  if (
+    !LOGO_CONTENT_TYPES.includes(type as (typeof LOGO_CONTENT_TYPES)[number])
+  ) {
+    return "Поддерживаются PNG, JPEG и WebP.";
+  }
+  return null;
+}
 
 /**
  * POST /upload/presign (JWT, любая роль). Тело: filename, contentType.
@@ -43,4 +69,39 @@ export async function uploadFileViaPresign(
   const presign = await requestPresign(api, file);
   await putFileToPresignedUrl(presign.uploadUrl, file);
   return presign.storageKey;
+}
+
+/**
+ * Логотип работодателя: presign → PUT → PATCH /users/me.
+ * Возвращает обновлённый профиль с logoUrl.
+ */
+export async function uploadCompanyLogo(
+  api: ApiPresignClient,
+  file: File,
+): Promise<UserMe> {
+  const validationError = validateLogoFile(file);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+  const presign = await requestPresign(api, file);
+  await putFileToPresignedUrl(presign.uploadUrl, file);
+  try {
+    return await api.patch<UserMe>(routes.users.me, {
+      logoStorageKey: presign.storageKey,
+    });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) {
+      throw new Error(
+        "Нет прав привязать этот файл. Ключ должен начинаться с uploads/{yourUserId}/.",
+      );
+    }
+    throw e;
+  }
+}
+
+/** Снять логотип с профиля работодателя. */
+export async function removeCompanyLogo(
+  api: ApiPresignClient,
+): Promise<UserMe> {
+  return api.patch<UserMe>(routes.users.me, { logoStorageKey: null });
 }

@@ -12,57 +12,22 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { ApplicationCardSkeletonList } from "@/components/ui/skeleton";
+import { Select } from "@/components/ui/select";
 
-const appStatuses: ApplicationStatus[] = [
-  "SUBMITTED",
-  "REVIEWING",
-  "SHORTLISTED",
-  "INTERVIEW",
-  "OFFER",
-  "REJECTED",
-  "WITHDRAWN",
-];
-
-const statusLabel: Record<ApplicationStatus, string> = {
-  SUBMITTED:   "Подано",
-  REVIEWING:   "Рассматривается",
-  SHORTLISTED: "Отобран",
-  INTERVIEW:   "Интервью",
-  OFFER:       "Оффер",
-  REJECTED:    "Отказ",
-  WITHDRAWN:   "Отозван",
-};
-
-const statusStyle: Record<ApplicationStatus, string> = {
-  SUBMITTED:   "bg-muted text-muted-foreground",
-  REVIEWING:   "bg-blue-500/10 text-blue-700",
-  SHORTLISTED: "bg-accent/10 text-accent",
-  INTERVIEW:   "bg-violet-500/10 text-violet-700",
-  OFFER:       "bg-success/10 text-success",
-  REJECTED:    "bg-danger/10 text-danger",
-  WITHDRAWN:   "bg-muted/60 text-muted-foreground",
-};
-
-function scoreBadge(score: number) {
-  const cls =
-    score >= 70
-      ? "bg-success/10 text-success"
-      : score >= 40
-        ? "bg-accent/10 text-accent"
-        : "bg-danger/10 text-danger";
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${cls}`}>
-      AI {score}
-    </span>
-  );
-}
-
-const selectClass =
-  "w-full min-w-[160px] rounded-xl border border-border bg-card px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/25";
+import {
+  allApplicationStatuses,
+  getStatusStyle,
+  employerScoreBadgeClass,
+} from "@/lib/application-display";
+import {
+  getEmployerStatusSelectOptions,
+  transitionErrorMessage,
+} from "@/lib/application-status-fsm";
+import { selectClass } from "@/lib/select-class";
 
 export default function JobApplicationsPage() {
   const params = useParams();
@@ -72,6 +37,7 @@ export default function JobApplicationsPage() {
   const { api } = useSession();
   const [applications, setApplications] = useState<Application[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [patchError, setPatchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const filterStatus = searchParams.get("status") as ApplicationStatus | null;
@@ -80,7 +46,9 @@ export default function JobApplicationsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get<Application[]>(routes.applications.byJob(jobId));
+      const data = await api.get<Application[]>(
+        routes.applications.byJob(jobId, filterStatus ?? undefined),
+      );
       setApplications(data);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка");
@@ -88,18 +56,26 @@ export default function JobApplicationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [jobId, api]);
+  }, [jobId, api, filterStatus]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   async function updateStatus(appId: string, status: ApplicationStatus) {
+    setPatchError(null);
     try {
       await api.patch<Application>(routes.applications.patchStatus(appId), { status });
       await load();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Не удалось обновить");
+      const status = e instanceof ApiError ? e.status : undefined;
+      setPatchError(
+        e instanceof ApiError
+          ? status === 400
+            ? transitionErrorMessage(400)
+            : e.message
+          : transitionErrorMessage(),
+      );
     }
   }
 
@@ -110,9 +86,9 @@ export default function JobApplicationsPage() {
     router.replace(`?${sp.toString()}`);
   }
 
-  const visible = filterStatus
-    ? applications.filter((a) => a.status === filterStatus)
-    : applications;
+  const visible = applications
+    .slice()
+    .sort((a, b) => (b.employerScore ?? 0) - (a.employerScore ?? 0));
 
   return (
     <RoleGuard allow={["EMPLOYER"]}>
@@ -140,16 +116,16 @@ export default function JobApplicationsPage() {
         {/* Filter */}
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <span className="text-sm font-medium text-muted-foreground">Фильтр:</span>
-          <select
-            className="rounded-xl border border-border bg-card px-3 py-2 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/25"
+          <Select
             value={filterStatus ?? ""}
             onChange={(e) => setFilter(e.target.value)}
+            className="min-w-[160px]"
           >
             <option value="">Все статусы</option>
-            {appStatuses.map((s) => (
-              <option key={s} value={s}>{statusLabel[s]}</option>
+            {allApplicationStatuses.map((s) => (
+              <option key={s} value={s}>{getStatusStyle(s).label}</option>
             ))}
-          </select>
+          </Select>
           {filterStatus && (
             <button
               onClick={() => setFilter("")}
@@ -160,13 +136,19 @@ export default function JobApplicationsPage() {
           )}
         </div>
 
+        {patchError ? (
+          <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {patchError}
+          </p>
+        ) : null}
+
         {error ? (
           <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {error}
           </p>
         ) : null}
         {loading ? (
-          <LoadingHint />
+          <ApplicationCardSkeletonList count={3} />
         ) : (
           <ul className="flex flex-col gap-5">
             {visible.map((app) => {
@@ -189,7 +171,11 @@ export default function JobApplicationsPage() {
                           <span className="text-sm text-muted-foreground">
                             {app.student?.email ?? app.studentUserId}
                           </span>
-                          {app.employerScore != null && scoreBadge(app.employerScore)}
+                          {app.employerScore != null && (
+                            <span className={employerScoreBadgeClass(app.employerScore)}>
+                              AI {app.employerScore}
+                            </span>
+                          )}
                         </div>
                         {(profile?.university || profile?.specialty) && (
                           <p className="text-sm text-muted-foreground">
@@ -198,9 +184,9 @@ export default function JobApplicationsPage() {
                         )}
                         <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`rounded-md px-2 py-0.5 text-xs font-medium ${statusStyle[app.status]}`}
+                            className={`rounded-md px-2 py-0.5 text-xs font-medium ${getStatusStyle(app.status).className}`}
                           >
-                            {statusLabel[app.status]}
+                            {getStatusStyle(app.status).label}
                           </span>
                           {app.studentUserId && (
                             <Link
@@ -224,7 +210,7 @@ export default function JobApplicationsPage() {
                         ) : null}
                       </div>
                       <div className="flex w-full flex-col gap-2 sm:max-w-[200px]">
-                        <Link href={`/employer/applications/${app.id}?jobId=${jobId}`}>
+                        <Link href={`/employer/applications/${app.id}`}>
                           <Button variant="secondary" type="button" className="w-full">
                             Детали
                           </Button>
@@ -245,8 +231,8 @@ export default function JobApplicationsPage() {
                               void updateStatus(app.id, e.target.value as ApplicationStatus)
                             }
                           >
-                            {appStatuses.map((s) => (
-                              <option key={s} value={s}>{statusLabel[s]}</option>
+                            {getEmployerStatusSelectOptions(app.status).map((s) => (
+                              <option key={s} value={s}>{getStatusStyle(s).label}</option>
                             ))}
                           </select>
                         </div>
@@ -263,7 +249,7 @@ export default function JobApplicationsPage() {
             title="Нет откликов"
             description={
               filterStatus
-                ? `Нет откликов со статусом «${statusLabel[filterStatus]}».`
+                ? `Нет откликов со статусом «${getStatusStyle(filterStatus).label}».`
                 : "Когда студенты откликнутся, они появятся здесь."
             }
           />

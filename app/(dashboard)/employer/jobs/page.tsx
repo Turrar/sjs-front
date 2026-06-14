@@ -1,37 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
 import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
-import type { Job, JobStatus, KaspiPaymentResponse } from "@/lib/types";
-import { salaryLine } from "@/lib/job-display";
+import type { Job, KaspiPaymentResponse } from "@/lib/types";
+import { salaryLine, getJobStatusLabel, getJobStatusStyle, jobLocationLine } from "@/lib/job-display";
+import { pollKaspiPremiumStatus } from "@/lib/kaspi-payment";
+import { PremiumBadge } from "@/components/ui/premium-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { JobCardSkeletonList } from "@/components/ui/skeleton";
 
-const jobStatusStyle: Record<JobStatus, string> = {
-  DRAFT:     "bg-muted/70 text-muted-foreground",
-  PUBLISHED: "bg-success/10 text-success",
-  PAUSED:    "bg-amber-500/10 text-amber-700",
-  CLOSED:    "bg-muted/70 text-muted-foreground",
-  ARCHIVED:  "bg-muted/50 text-muted-foreground",
-};
-
-const jobStatusLabel: Record<JobStatus, string> = {
-  DRAFT:    "Черновик",
-  PUBLISHED: "Опубликована",
-  PAUSED:   "Приостановлена",
-  CLOSED:   "Закрыта",
-  ARCHIVED: "Архив",
-};
 
 export default function EmployerJobsPage() {
   const { api } = useSession();
@@ -39,6 +26,12 @@ export default function EmployerJobsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [pollingJobId, setPollingJobId] = useState<string | null>(null);
+  const [premiumSuccess, setPremiumSuccess] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const pollAbortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,7 +57,42 @@ export default function EmployerJobsPage() {
       await api.delete(routes.jobs.byId(id));
       await load();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Не удалось удалить");
+      setActionError(e instanceof ApiError ? e.message : "Не удалось удалить");
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      pollAbortRef.current?.abort();
+    };
+  }, []);
+
+  async function pollPremiumStatus(jobId: string) {
+    pollAbortRef.current?.abort();
+    const controller = new AbortController();
+    pollAbortRef.current = controller;
+    setPollingJobId(jobId);
+    setPollError(null);
+    setPremiumSuccess(null);
+
+    const result = await pollKaspiPremiumStatus({
+      jobId,
+      api: (path) => api.get(path),
+      signal: controller.signal,
+    });
+
+    if (controller.signal.aborted) return;
+
+    setPollingJobId(null);
+    if (result.ok) {
+      setPremiumSuccess(result.status.title || "Вакансия продвинута");
+      await load();
+    } else if (result.reason === "timeout") {
+      setPollError("Оплата не подтверждена. Обновите страницу позже или повторите оплату.");
+      await load();
+    } else if (result.reason === "error") {
+      setPollError(result.message ?? "Ошибка проверки оплаты");
+      await load();
     }
   }
 
@@ -73,8 +101,9 @@ export default function EmployerJobsPage() {
     try {
       const res = await api.post<KaspiPaymentResponse>(routes.payments.kaspiPremium(id), {});
       window.open(res.paymentUrl, "_blank");
+      void pollPremiumStatus(id);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Не удалось создать платёж");
+      setActionError(e instanceof ApiError ? e.message : "Не удалось создать платёж");
     } finally {
       setPromotingId(null);
     }
@@ -92,13 +121,28 @@ export default function EmployerJobsPage() {
             </Link>
           }
         />
+        {actionError ? (
+          <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {actionError}
+          </p>
+        ) : null}
         {error ? (
           <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {error}
           </p>
         ) : null}
+        {premiumSuccess ? (
+          <p className="mb-6 rounded-xl border border-success/30 bg-success/5 px-4 py-3 text-sm text-success">
+            {premiumSuccess}
+          </p>
+        ) : null}
+        {pollError ? (
+          <p className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800">
+            {pollError}
+          </p>
+        ) : null}
         {loading ? (
-          <LoadingHint />
+          <JobCardSkeletonList count={4} />
         ) : (
           <ul className="flex flex-col gap-4">
             {jobs.map((job) => {
@@ -109,25 +153,21 @@ export default function EmployerJobsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
-                          href={`/jobs/${job.id}`}
+                          href={`/employer/jobs/${job.id}/edit`}
                           className="font-semibold text-foreground transition-colors hover:text-accent"
                         >
                           {job.title}
                         </Link>
-                        {job.isPremium && (
-                          <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                            ★ Premium
-                          </span>
-                        )}
+                        {job.isPremium && <PremiumBadge />}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                         <span
-                          className={`rounded-md px-2 py-0.5 text-xs font-medium ${jobStatusStyle[job.status]}`}
+                          className={`rounded-md px-2 py-0.5 text-xs font-medium ${getJobStatusStyle(job.status)}`}
                         >
-                          {jobStatusLabel[job.status]}
+                          {getJobStatusLabel(job.status)}
                         </span>
-                        {job.location || job.city?.name ? (
-                          <span>{job.city?.name ?? job.location}</span>
+                        {jobLocationLine(job) ? (
+                          <span>{jobLocationLine(job)}</span>
                         ) : null}
                         {salary ? <span>{salary}</span> : null}
                       </div>
@@ -137,10 +177,14 @@ export default function EmployerJobsPage() {
                         <Button
                           variant="secondary"
                           type="button"
-                          disabled={promotingId === job.id}
+                          disabled={promotingId === job.id || pollingJobId === job.id}
                           onClick={() => void promoteJob(job.id)}
                         >
-                          {promotingId === job.id ? "…" : "Продвинуть"}
+                          {promotingId === job.id
+                            ? "…"
+                            : pollingJobId === job.id
+                              ? "Проверка оплаты…"
+                              : "Продвинуть"}
                         </Button>
                       )}
                       <Link href={`/employer/jobs/${job.id}/edit`}>

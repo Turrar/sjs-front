@@ -11,10 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 const selectClass =
@@ -207,8 +207,8 @@ export default function JobAlertsPage() {
         isActive: !alert.isActive,
       } as JobAlertPatch);
       setAlerts((prev) => prev.map((a) => (a.id === alert.id ? updated : a)));
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Не удалось изменить подписку");
     }
   }
 
@@ -344,7 +344,7 @@ export default function JobAlertsPage() {
         ) : null}
 
         {loading ? (
-          <LoadingHint />
+          <SimpleListSkeleton count={4} />
         ) : alerts.length === 0 && !showForm ? (
           <EmptyState
             title="Нет подписок"

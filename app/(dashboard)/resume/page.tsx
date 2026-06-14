@@ -24,6 +24,7 @@ import type {
   ResumeDraft,
   ResumeDraftCreate,
   ResumeDraftPatch,
+  MediaUrlResponse,
 } from "@/lib/types";
 import {
   putFileToPresignedUrl,
@@ -34,10 +35,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { FormSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 export default function ResumePage() {
@@ -48,6 +49,7 @@ export default function ResumePage() {
   const [jsonText, setJsonText] = useState("{}");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [pdfUploading, setPdfUploading] = useState(false);
   const [suggestions, setSuggestions] = useState<string | null>(null);
@@ -105,6 +107,7 @@ export default function ResumePage() {
   async function saveDraft() {
     if (!selectedId) return;
     setError(null);
+    setSaving(true);
     if (title.length > TITLE_MAX) {
       setError(`Заголовок не длиннее ${TITLE_MAX} символов.`);
       return;
@@ -128,6 +131,21 @@ export default function ResumePage() {
       setDrafts((prev) => prev.map((x) => (x.id === d.id ? d : x)));
     } catch (e) {
       setError(resumeErrorMessage(e, "Ошибка сохранения"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function downloadPdf() {
+    if (!selected?.pdfStorageKey) return;
+    setError(null);
+    try {
+      const res = await api.get<MediaUrlResponse>(
+        routes.media.url(selected.pdfStorageKey),
+      );
+      window.open(res.url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      setError(resumeErrorMessage(e, "Не удалось скачать PDF"));
     }
   }
 
@@ -188,7 +206,7 @@ export default function ResumePage() {
       setTimeout(() => suggestionsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (e) {
       setSuggestionsError(
-        resumeErrorMessage(e, "AI недоступен — проверьте OPENAI_API_KEY"),
+        resumeErrorMessage(e, "Сервис AI временно недоступен"),
       );
     } finally {
       setSuggestionsLoading(false);
@@ -215,7 +233,7 @@ export default function ResumePage() {
       <PageContainer>
         <PageHeader
           title="Резюме"
-          description="Черновики только для студента. Без профиля студента список недоступен (403). PDF — после presign и PUT в S3."
+          description="Черновики резюме и привязка PDF для откликов."
           action={
             <Button type="button" onClick={() => void createDraft()}>
               Новый черновик
@@ -230,7 +248,7 @@ export default function ResumePage() {
         ) : null}
 
         {loading ? (
-          <LoadingHint />
+          <FormSkeleton fields={8} />
         ) : (
           <div className="grid gap-6 lg:grid-cols-[minmax(0,240px)_1fr]">
             <Card padding={false} className="overflow-hidden p-4 sm:p-5">
@@ -268,14 +286,13 @@ export default function ResumePage() {
                 <>
                   <CardTitle as="h2">Редактирование</CardTitle>
                   <CardDescription className="mb-6">
-                    contentJson — произвольный объект (валидный JSON). Заголовок — до{" "}
-                    {TITLE_MAX} символов.
+                    Заголовок — до {TITLE_MAX} символов. Содержимое — валидный JSON.
                   </CardDescription>
                   <div className="mb-6 rounded-xl border border-border/80 bg-muted/30 p-4">
                     <p className="text-sm font-medium text-foreground">PDF</p>
                     {selected.pdfStorageKey ? (
-                      <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                        pdfStorageKey: {selected.pdfStorageKey}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        PDF привязан к черновику.
                       </p>
                     ) : (
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -307,6 +324,15 @@ export default function ResumePage() {
                       {selected.pdfStorageKey ? (
                         <Button
                           type="button"
+                          variant="secondary"
+                          onClick={() => void downloadPdf()}
+                        >
+                          Скачать PDF
+                        </Button>
+                      ) : null}
+                      {selected.pdfStorageKey ? (
+                        <Button
+                          type="button"
                           variant="ghost"
                           disabled={pdfUploading}
                           onClick={() => void unlinkPdf()}
@@ -330,8 +356,8 @@ export default function ResumePage() {
                       className="min-h-[300px] font-mono text-xs leading-relaxed"
                     />
                     <div className="flex flex-wrap gap-3 pt-2">
-                      <Button type="button" onClick={() => void saveDraft()}>
-                        Сохранить
+                      <Button type="button" onClick={() => void saveDraft()} disabled={saving}>
+                        {saving ? "Сохранение…" : "Сохранить"}
                       </Button>
                       <Button
                         type="button"

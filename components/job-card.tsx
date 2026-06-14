@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Job } from "@/lib/types";
-import { jobCardChipLabels, jobLocationLine } from "@/lib/job-display";
+import { jobCardChipLabels, jobLocationLine, salaryLine } from "@/lib/job-display";
+import { PremiumBadge } from "@/components/ui/premium-badge";
 import { cn } from "@/lib/cn";
 
 const btnBase =
@@ -9,25 +10,6 @@ const btnPrimary =
   "bg-accent text-accent-foreground shadow-sm shadow-accent/20 hover:brightness-105";
 const btnSecondary =
   "border border-border bg-card text-foreground shadow-sm hover:bg-muted/80";
-
-function currencySymbol(code: string | null | undefined): string {
-  const c = (code ?? "").toUpperCase();
-  if (c === "KZT" || c === "₸") return "₸";
-  if (c === "USD") return "$";
-  if (c === "EUR") return "€";
-  if (c === "RUB") return "₽";
-  return c || "";
-}
-
-function formatSalary(job: Job): { line: string; periodHint: string } | null {
-  if (job.salaryMin == null && job.salaryMax == null) return null;
-  const sym = currencySymbol(job.currency);
-  const fmt = (n: number) => n.toLocaleString("ru-RU");
-  const min = job.salaryMin != null ? fmt(job.salaryMin) : "—";
-  const max = job.salaryMax != null ? fmt(job.salaryMax) : "—";
-  const line = sym ? `${min} – ${max} ${sym}` : `${min} – ${max}`;
-  return { line, periodHint: "за месяц" };
-}
 
 type JobCardProps = {
   job: Job;
@@ -45,7 +27,7 @@ export function JobCard({
   detailBasePath = "/jobs",
 }: JobCardProps) {
   const href = `${detailBasePath.replace(/\/$/, "")}/${job.id}`;
-  const salary = formatSalary(job);
+  const salary = salaryLine(job);
   const tags = jobCardChipLabels(job);
   const locationLine = jobLocationLine(job);
   const companyName =
@@ -63,18 +45,14 @@ export function JobCard({
         <h2 className="text-2xl font-semibold leading-tight tracking-tight text-foreground">
           {job.title}
         </h2>
-        {job.isPremium ? (
-          <span className="shrink-0 rounded-lg bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
-            Премиум
-          </span>
-        ) : null}
+        {job.isPremium ? <PremiumBadge className="shrink-0 rounded-lg px-2.5 py-1 text-xs" /> : null}
       </div>
 
       {salary ? (
         <div className="mb-3 text-xl font-medium text-foreground">
-          {salary.line}
+          {salary}
           <span className="ml-2 text-sm font-normal text-muted-foreground">
-            {salary.periodHint}
+            за месяц
           </span>
         </div>
       ) : (
@@ -100,7 +78,7 @@ export function JobCard({
           </span>
         ) : (
           <span className="ml-2 inline-flex items-center rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-            {job.status}
+            Набор закрыт
           </span>
         )}
       </div>
@@ -121,8 +99,8 @@ export function JobCard({
         <Link href={href} className={cn(btnBase, btnPrimary)}>
           Откликнуться
         </Link>
-        <Link href={href} className={cn(btnBase, btnSecondary)}>
-          Связаться
+        <Link href={`${href}#contact`} className={cn(btnBase, btnSecondary)}>
+          Подробнее
         </Link>
       </div>
     </article>

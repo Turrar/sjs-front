@@ -13,7 +13,6 @@ import {
 import { ApiError } from "@/lib/api-base";
 import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
-import { fetchPublic } from "@/lib/session-api";
 import type { Job, JobFormCatalog, JobStatus } from "@/lib/types";
 import {
   JobFormCategoryPicker,
@@ -29,15 +28,14 @@ import {
   ensureJobDescriptionHtml,
   isJobDescriptionEmpty,
 } from "@/lib/job-description-html";
+import { PremiumBadge } from "@/components/ui/premium-badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import {
-  LoadingHint,
-  PageContainer,
-  PageHeader,
-} from "@/components/layout/page";
+import { PageContainer, PageHeader } from "@/components/layout/page";
+import { FormSkeleton } from "@/components/ui/skeleton";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { useToast } from "@/components/providers/toast-provider";
 
-const selectClass =
-  "w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm shadow-sm outline-none transition-[border-color,box-shadow] focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-ring/25";
+import { selectClass } from "@/lib/select-class";
 
 const statuses: JobStatus[] = [
   "DRAFT",
@@ -50,7 +48,7 @@ const statuses: JobStatus[] = [
 export default function EditJobPage() {
   const params = useParams();
   const id = params.id as string;
-  const { api, accessToken } = useSession();
+  const { api } = useSession();
 
   const [catalog, setCatalog] = useState<JobFormCatalog | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -66,12 +64,12 @@ export default function EditJobPage() {
   const [currency, setCurrency] = useState("");
   const [requiredWeeklyHours, setRequiredWeeklyHours] = useState("");
   const [status, setStatus] = useState<JobStatus>("DRAFT");
-  const [isPremium, setIsPremium] = useState(false);
   const [workRows, setWorkRows] = useState<WorkWindowRow[]>([]);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
+  const toast = useToast();
 
   const cities = useMemo(() => {
     const list = catalog?.cities ?? [];
@@ -102,11 +100,7 @@ export default function EditJobPage() {
       try {
         const [cat, j] = await Promise.all([
           api.get<JobFormCatalog>(routes.catalog.jobForm),
-          fetchPublic<Job>(
-            routes.jobs.byId(id),
-            { method: "GET" },
-            accessToken ?? undefined,
-          ),
+          api.get<Job>(routes.jobs.byId(id)),
         ]);
         if (cancelled) return;
         setCatalog(cat);
@@ -124,7 +118,6 @@ export default function EditJobPage() {
           j.requiredWeeklyHours != null ? String(j.requiredWeeklyHours) : "",
         );
         setStatus(j.status);
-        setIsPremium(j.isPremium ?? false);
         setWorkRows(workWindowsFromApi(j.workWindows));
       } catch (e) {
         if (!cancelled)
@@ -136,7 +129,7 @@ export default function EditJobPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, accessToken, api]);
+  }, [id, api]);
 
   function toggleCategory(cid: string) {
     setCategoryIds((prev) => {
@@ -200,19 +193,33 @@ export default function EditJobPage() {
         location: location || undefined,
         status,
         currency: currency || undefined,
-        isPremium,
         cityId: cityId || null,
         categoryIds: [...categoryIds],
         tagIds: [...tagIds],
       };
-      if (salaryMin !== "") body.salaryMin = parseInt(salaryMin, 10);
-      if (salaryMax !== "") body.salaryMax = parseInt(salaryMax, 10);
+      if (salaryMin !== "") {
+        const v = parseInt(salaryMin, 10);
+        if (Number.isNaN(v)) {
+          setError("Зарплата «от» должна быть числом.");
+          return;
+        }
+        body.salaryMin = v;
+      }
+      if (salaryMax !== "") {
+        const v = parseInt(salaryMax, 10);
+        if (Number.isNaN(v)) {
+          setError("Зарплата «до» должна быть числом.");
+          return;
+        }
+        body.salaryMax = v;
+      }
       if (requiredWeeklyHours !== "")
         body.requiredWeeklyHours = parseInt(requiredWeeklyHours, 10);
       body.workWindows =
         workRows.length > 0 ? workWindowsToApi(workRows) : [];
       const updated = await api.patch<Job>(routes.jobs.byId(id), body);
       setJob(updated);
+      toast.success("Вакансия сохранена");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Ошибка сохранения");
     } finally {
@@ -224,7 +231,7 @@ export default function EditJobPage() {
     return (
       <RoleGuard allow={["EMPLOYER"]}>
         <PageContainer narrow>
-          <LoadingHint />
+          <FormSkeleton fields={10} />
         </PageContainer>
       </RoleGuard>
     );
@@ -251,24 +258,15 @@ export default function EditJobPage() {
   return (
     <RoleGuard allow={["EMPLOYER"]}>
       <PageContainer narrow>
-        <div className="mb-6 flex flex-wrap gap-3 text-sm">
-          <Link
-            href="/employer/jobs"
-            className="font-medium text-muted-foreground transition-colors hover:text-accent"
-          >
-            ← Мои вакансии
-          </Link>
-          <span className="text-border">|</span>
-          <Link
-            href={`/employer/jobs/${id}/applications`}
-            className="font-medium text-muted-foreground transition-colors hover:text-accent"
-          >
-            Отклики
-          </Link>
-        </div>
+        <Breadcrumb
+          items={[
+            { label: "Мои вакансии", href: "/employer/jobs" },
+            { label: title || "Редактирование" },
+          ]}
+        />
         <PageHeader
           title="Редактирование вакансии"
-          description="Смените статус на «Опубликована», когда всё готово. Справочники из GET /catalog/job-form."
+          description="Обновите данные и смените статус на «Опубликована», когда вакансия готова к показу студентам."
         />
         <Card>
           <CardTitle as="h2">Форма</CardTitle>
@@ -367,15 +365,25 @@ export default function EditJobPage() {
               onChange={(e) => setRequiredWeeklyHours(e.target.value)}
             />
 
-            <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-border/80 bg-muted/40 px-4 py-3 text-sm">
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-border text-accent"
-                checked={isPremium}
-                onChange={(e) => setIsPremium(e.target.checked)}
-              />
-              Премиум-размещение в ленте
-            </label>
+            {job?.isPremium ? (
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/80 bg-muted/40 px-4 py-3 text-sm">
+                <PremiumBadge />
+                <span className="text-muted-foreground">
+                  Премиум активен.{" "}
+                  <Link href="/employer/jobs" className="font-medium text-accent hover:underline">
+                    Продлить или продвинуть
+                  </Link>
+                </span>
+              </div>
+            ) : (
+              <p className="rounded-xl border border-border/80 bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                Премиум-размещение доступно на{" "}
+                <Link href="/employer/jobs" className="font-medium text-accent hover:underline">
+                  странице вакансий
+                </Link>
+                .
+              </p>
+            )}
 
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

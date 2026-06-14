@@ -11,21 +11,18 @@ import type {
   InternshipLogEntry,
   InternshipTask,
   InternshipTaskStatus,
+  InternshipTotalHoursResponse,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer } from "@/components/layout/page";
+import { RoleGuard } from "@/components/role-guard";
+import { PageContainer } from "@/components/layout/page";
+import { DetailPageSkeleton } from "@/components/ui/skeleton";
+import { getInternshipStatus, getInternshipTaskStatus } from "@/lib/internship-display";
+import { StarRating } from "@/components/ui/star-rating";
 import { cn } from "@/lib/cn";
-
-const taskStatusLabels: Record<
-  InternshipTaskStatus,
-  { label: string; className: string }
-> = {
-  TODO: { label: "К выполнению", className: "bg-muted/70 text-muted-foreground" },
-  IN_PROGRESS: { label: "В работе", className: "bg-sky-500/10 text-sky-700" },
-  DONE: { label: "Выполнено", className: "bg-success/10 text-success" },
-};
 
 const taskStatusNext: Record<InternshipTaskStatus, InternshipTaskStatus> = {
   TODO: "IN_PROGRESS",
@@ -50,6 +47,14 @@ export default function InternshipDetailPage() {
   const [logDesc, setLogDesc] = useState("");
   const [logSaving, setLogSaving] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
+
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewAnonymous, setReviewAnonymous] = useState(false);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewDone, setReviewDone] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,10 +62,16 @@ export default function InternshipDetailPage() {
     try {
       const [internData, hoursData] = await Promise.all([
         api.get<Internship>(routes.internships.byId(internshipId)),
-        api.get<number>(routes.internships.totalHours(internshipId)).catch(() => 0),
+        api
+          .get<InternshipTotalHoursResponse>(routes.internships.totalHours(internshipId))
+          .then((r) => r.totalHours)
+          .catch(() => 0),
       ]);
       setIntern(internData);
       setTotalHours(hoursData);
+      if (internData.hasReviewed) {
+        setReviewDone(true);
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
     } finally {
@@ -71,6 +82,33 @@ export default function InternshipDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function submitReview() {
+    if (!intern || reviewRating < 1) {
+      setReviewError("Укажите оценку от 1 до 5");
+      return;
+    }
+    setReviewSaving(true);
+    setReviewError(null);
+    try {
+      await api.post(routes.reviews.create, {
+        employerUserId: intern.employerUserId,
+        rating: reviewRating,
+        comment: reviewComment.trim() || null,
+        isAnonymous: reviewAnonymous,
+      });
+      setReviewDone(true);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        setReviewDone(true);
+        setReviewError(null);
+      } else {
+        setReviewError(e instanceof ApiError ? e.message : "Не удалось отправить отзыв");
+      }
+    } finally {
+      setReviewSaving(false);
+    }
+  }
 
   async function addLogEntry() {
     const hours = parseFloat(logHours);
@@ -96,9 +134,12 @@ export default function InternshipDetailPage() {
           logEntries: [...(prev.logEntries ?? []), entry],
         };
       });
-      setTotalHours((h) => h + hours);
       setLogHours("");
       setLogDesc("");
+      const hoursRes = await api.get<InternshipTotalHoursResponse>(
+        routes.internships.totalHours(internshipId),
+      );
+      setTotalHours(hoursRes.totalHours);
     } catch (e) {
       setLogError(e instanceof ApiError ? e.message : "Ошибка сохранения");
     } finally {
@@ -108,6 +149,7 @@ export default function InternshipDetailPage() {
 
   async function updateTaskStatus(task: InternshipTask) {
     const nextStatus = taskStatusNext[task.status];
+    setTaskError(null);
     try {
       const updated = await api.patch<InternshipTask>(
         routes.internships.patchTask(task.id),
@@ -120,8 +162,8 @@ export default function InternshipDetailPage() {
           tasks: prev.tasks?.map((t) => (t.id === task.id ? updated : t)),
         };
       });
-    } catch {
-      /* silently fail */
+    } catch (e) {
+      setTaskError(e instanceof ApiError ? e.message : "Не удалось обновить задачу");
     }
   }
 
@@ -135,6 +177,7 @@ export default function InternshipDetailPage() {
   };
 
   return (
+    <RoleGuard allow={["STUDENT"]}>
     <PageContainer>
       <div className="mb-6">
         <Link
@@ -146,7 +189,7 @@ export default function InternshipDetailPage() {
       </div>
 
       {loading ? (
-        <LoadingHint />
+        <DetailPageSkeleton />
       ) : error ? (
         <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
           {error}
@@ -160,7 +203,17 @@ export default function InternshipDetailPage() {
                 {intern.application?.job?.title ?? "Стажировка"}
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Статус: {intern.status} · Всего часов:{" "}
+                {(() => {
+                  const st = getInternshipStatus(intern.status);
+                  return (
+                    <>
+                      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", st.className)}>
+                        {st.label}
+                      </span>
+                      {" · "}Всего часов:{" "}
+                    </>
+                  );
+                })()}
                 <span className="font-semibold text-foreground">{totalHours}</span>
               </p>
             </div>
@@ -171,6 +224,11 @@ export default function InternshipDetailPage() {
             <h2 className="mb-3 text-base font-semibold text-foreground">
               Задачи
             </h2>
+            {taskError ? (
+              <p className="mb-3 rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">
+                {taskError}
+              </p>
+            ) : null}
             {tasks.length === 0 ? (
               <Card>
                 <p className="text-center text-sm text-muted-foreground py-4">
@@ -181,7 +239,7 @@ export default function InternshipDetailPage() {
               <div className="grid gap-4 sm:grid-cols-3">
                 {(["TODO", "IN_PROGRESS", "DONE"] as InternshipTaskStatus[]).map(
                   (col) => {
-                    const st = taskStatusLabels[col];
+                    const st = getInternshipTaskStatus(col);
                     return (
                       <div key={col}>
                         <div
@@ -350,8 +408,57 @@ export default function InternshipDetailPage() {
               </Card>
             </section>
           ) : null}
+
+          {/* Student review about employer */}
+          {intern.status === "COMPLETED" && !reviewDone ? (
+            <section>
+              <Card>
+                <CardTitle as="h2" className="mb-3 text-base">
+                  Оставить отзыв о компании
+                </CardTitle>
+                <CardDescription className="mb-4">
+                  Ваш отзыв поможет другим студентам выбрать работодателя.
+                </CardDescription>
+                <StarRating value={reviewRating} onChange={setReviewRating} />
+                <Textarea
+                  label="Комментарий (необязательно)"
+                  value={reviewComment}
+                  onChange={(e) => setReviewComment(e.target.value)}
+                  placeholder="Расскажите о вашем опыте стажировки…"
+                />
+                <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={reviewAnonymous}
+                    onChange={(e) => setReviewAnonymous(e.target.checked)}
+                  />
+                  Опубликовать анонимно
+                </label>
+                {reviewError && (
+                  <p className="mt-3 text-sm text-danger">{reviewError}</p>
+                )}
+                <Button
+                  type="button"
+                  className="mt-4"
+                  disabled={reviewSaving || reviewRating < 1}
+                  onClick={() => void submitReview()}
+                >
+                  {reviewSaving ? "Отправка…" : "Отправить отзыв"}
+                </Button>
+              </Card>
+            </section>
+          ) : reviewDone ? (
+            <section>
+              <Card className="border-success/30 bg-success/5">
+                <p className="text-sm font-medium text-success">
+                  Спасибо! Отзыв отправлен.
+                </p>
+              </Card>
+            </section>
+          ) : null}
         </div>
       ) : null}
     </PageContainer>
+    </RoleGuard>
   );
 }

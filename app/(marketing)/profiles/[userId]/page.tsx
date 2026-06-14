@@ -4,25 +4,11 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
-import { getApiBase } from "@/lib/api-base";
+import { fetchPublic } from "@/lib/session-api";
+import { scorePercentClass } from "@/lib/application-display";
 import type { PublicProfile, SkillBadge } from "@/lib/types";
-import { LoadingHint } from "@/components/layout/page";
+import { DetailPageSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
-
-function scoreColor(score: number) {
-  if (score >= 80) return "bg-success/15 text-success";
-  if (score >= 60) return "bg-accent/15 text-accent";
-  return "bg-danger/10 text-danger";
-}
-
-async function fetchPublic<T>(path: string): Promise<T> {
-  const res = await fetch(`${getApiBase()}${path}`);
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { message?: string } | null;
-    throw new ApiError(res.status, path, body?.message ?? res.statusText);
-  }
-  return res.json() as Promise<T>;
-}
 
 export default function PublicProfilePage() {
   const params = useParams();
@@ -69,7 +55,7 @@ export default function PublicProfilePage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
       {loading ? (
-        <LoadingHint />
+        <DetailPageSkeleton />
       ) : error ? (
         <div className="rounded-2xl border border-danger/30 bg-danger/5 px-6 py-8 text-center">
           <p className="text-lg font-semibold text-danger">Профиль не найден</p>
@@ -79,9 +65,17 @@ export default function PublicProfilePage() {
         <div className="space-y-8">
           {/* Hero */}
           <div className="flex flex-col items-center gap-6 text-center sm:flex-row sm:items-start sm:text-left">
+            {profile.avatarUrl ? (
+              <img
+                src={profile.avatarUrl}
+                alt={fullName ?? "Аватар"}
+                className="h-20 w-20 shrink-0 rounded-2xl object-cover shadow-sm ring-2 ring-border"
+              />
+            ) : (
             <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-accent/15 text-3xl font-bold text-accent shadow-sm">
               {(profile.firstName?.[0] ?? profile.userId[0]).toUpperCase()}
             </div>
+            )}
             <div className="min-w-0">
               {fullName ? (
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">
@@ -133,7 +127,7 @@ export default function PublicProfilePage() {
                     key={b.id}
                     className={cn(
                       "flex items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-semibold shadow-sm",
-                      scoreColor(b.scorePercent),
+                      scorePercentClass(b.scorePercent),
                     )}
                   >
                     <span>{b.skill}</span>

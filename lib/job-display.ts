@@ -1,4 +1,4 @@
-import type { City, Job, JobCategory } from "@/lib/types";
+import type { City, Job, JobCategory, JobStatus } from "@/lib/types";
 
 /** Показ названия города: nameI18n (ru/kk) или name */
 export function cityDisplayName(
@@ -61,7 +61,9 @@ export function salaryLine(job: Pick<Job, "salaryMin" | "salaryMax" | "currency"
 }
 
 /** Строка локации: город из связи или текст location */
-export function jobLocationLine(job: Job): string | null {
+export function jobLocationLine(
+  job: Pick<Job, "location" | "city">,
+): string | null {
   if (job.city) {
     const cityName = cityDisplayName(job.city);
     if (job.location?.trim()) {
@@ -71,4 +73,28 @@ export function jobLocationLine(job: Job): string | null {
   }
   if (job.location?.trim()) return job.location.trim();
   return null;
+}
+
+export const jobStatusStyles: Record<JobStatus, string> = {
+  DRAFT:     "bg-muted/70 text-muted-foreground",
+  PUBLISHED: "bg-success/10 text-success",
+  PAUSED:    "bg-amber-500/10 text-amber-700",
+  CLOSED:    "bg-muted/70 text-muted-foreground",
+  ARCHIVED:  "bg-muted/50 text-muted-foreground",
+};
+
+export const jobStatusLabels: Record<JobStatus, string> = {
+  DRAFT:     "Черновик",
+  PUBLISHED: "Опубликована",
+  PAUSED:    "Приостановлена",
+  CLOSED:    "Закрыта",
+  ARCHIVED:  "Архив",
+};
+
+export function getJobStatusLabel(status: JobStatus): string {
+  return jobStatusLabels[status] ?? status;
+}
+
+export function getJobStatusStyle(status: JobStatus): string {
+  return jobStatusStyles[status] ?? "bg-muted/70 text-muted-foreground";
 }

@@ -11,7 +11,8 @@ import { createChatSocket } from "@/lib/chat-socket";
 import type { Message } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { LoadingHint, PageContainer } from "@/components/layout/page";
+import { PageContainer } from "@/components/layout/page";
+import { ChatSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 const CHAT_BODY_MIN = 1;
@@ -80,7 +81,6 @@ export default function ApplicationChatPage() {
     if (!accessToken) return;
     const socket = createChatSocket(accessToken);
     socketRef.current = socket;
-    let joinFallbackTimer: number | undefined;
 
     const onIncoming = (raw: unknown) => {
       const msg = parseIncomingMessage(raw);
@@ -92,25 +92,21 @@ export default function ApplicationChatPage() {
       roomReadyRef.current = false;
       setRoomReady(false);
       setSocketHint("Подключение к комнате…");
-      if (joinFallbackTimer) clearTimeout(joinFallbackTimer);
-      joinFallbackTimer = window.setTimeout(() => {
-        joinFallbackTimer = undefined;
-        setSocketHint(null);
-        roomReadyRef.current = true;
-        setRoomReady(true);
-      }, 2500);
       socket.emit("join", applicationId, (ack?: JoinAck) => {
-        if (joinFallbackTimer) {
-          clearTimeout(joinFallbackTimer);
-          joinFallbackTimer = undefined;
-        }
-        setSocketHint(null);
         if (ack?.error === "forbidden") {
+          setSocketHint(null);
           roomReadyRef.current = false;
           setError("Нет доступа к этому чату");
           setRoomReady(false);
           return;
         }
+        if (!ack?.ok) {
+          setSocketHint("Не удалось подключиться к комнате");
+          roomReadyRef.current = false;
+          setRoomReady(false);
+          return;
+        }
+        setSocketHint(null);
         roomReadyRef.current = true;
         setRoomReady(true);
       });
@@ -137,7 +133,6 @@ export default function ApplicationChatPage() {
     if (socket.connected) emitJoin();
 
     return () => {
-      if (joinFallbackTimer) clearTimeout(joinFallbackTimer);
       socket.off("connect", emitJoin);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
@@ -214,10 +209,14 @@ export default function ApplicationChatPage() {
       <PageContainer narrow>
         <div className="mb-6 flex flex-wrap items-center gap-3 text-sm">
           <Link
-            href="/applications"
+            href={
+              user?.role === "EMPLOYER"
+                ? `/employer/applications/${applicationId}`
+                : "/applications"
+            }
             className="font-medium text-muted-foreground transition-colors hover:text-accent"
           >
-            ← Мои отклики
+            ← {user?.role === "EMPLOYER" ? "К отклику" : "Мои отклики"}
           </Link>
           {user?.role === "EMPLOYER" ? (
             <>
@@ -262,7 +261,7 @@ export default function ApplicationChatPage() {
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Переписка
               {!roomReady && accessToken ? (
-                <span className="ml-2 font-normal text-amber-700 dark:text-amber-300">
+                <span className="ml-2 font-normal text-amber-700">
                   (ожидание сокета…)
                 </span>
               ) : null}
@@ -270,7 +269,11 @@ export default function ApplicationChatPage() {
           </div>
           <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
             {loading ? (
-              <LoadingHint />
+              <ChatSkeleton />
+            ) : messages.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                Начните переписку — отправьте первое сообщение.
+              </p>
             ) : (
               messages.map((m) => (
                 <div

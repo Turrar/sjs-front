@@ -68,6 +68,49 @@ export async function fetchWithAuth<T>(
   return JSON.parse(text) as T;
 }
 
+export type AuthContext = {
+  getAccessToken: () => string | null;
+  getRefreshToken: () => string | null;
+  setTokens: (access: string, refresh: string) => void;
+  clearTokens: () => void;
+};
+
+/** Authenticated fetch that returns a Blob (e.g. calendar .ics export). */
+export async function fetchBlobWithAuth(
+  ctx: AuthContext,
+  path: string,
+  init: RequestInit = {},
+  retried = false,
+): Promise<Blob> {
+  const base = getApiBase();
+  const url = `${base}${path}`;
+  const headers = new Headers(init.headers);
+  const access = ctx.getAccessToken();
+  if (access) {
+    headers.set("Authorization", `Bearer ${access}`);
+  }
+
+  const res = await fetch(url, { ...init, headers });
+
+  if (res.status === 401 && !retried) {
+    const refresh = ctx.getRefreshToken();
+    if (refresh) {
+      const newTokens = await refreshTokens(refresh);
+      if (newTokens) {
+        ctx.setTokens(newTokens.accessToken, newTokens.refreshToken);
+        return fetchBlobWithAuth(ctx, path, init, true);
+      }
+    }
+    ctx.clearTokens();
+  }
+
+  if (!res.ok) {
+    await parseErrorResponse(res, path);
+  }
+
+  return res.blob();
+}
+
 /** Public endpoints (no auth) */
 export async function fetchPublic<T>(
   path: string,

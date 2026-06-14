@@ -7,18 +7,16 @@ import { fetchPublic } from "@/lib/session-api";
 import type { Job, JobFormCatalog, JobCategory } from "@/lib/types";
 import { categoryTreeLabel } from "@/lib/job-display";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
 import { JobCard } from "@/components/job-card";
-
-const selectClass =
-  "w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm shadow-sm outline-none transition-[border-color,box-shadow] focus-visible:border-accent/60 focus-visible:ring-2 focus-visible:ring-ring/25";
+import { JobCardSkeletonList } from "@/components/ui/skeleton";
+import { cn } from "@/lib/cn";
 
 type ActiveFilters = {
   q: string;
@@ -29,8 +27,22 @@ type ActiveFilters = {
   compatible: boolean;
 };
 
+const emptyFilters: ActiveFilters = {
+  q: "",
+  location: "",
+  cityId: "",
+  categoryId: "",
+  tagId: "",
+  compatible: false,
+};
+
 type JobsBrowseContentProps = {
   detailBasePath?: string;
+};
+
+type FilterChip = {
+  key: keyof ActiveFilters;
+  label: string;
 };
 
 export function JobsBrowseContent({
@@ -48,14 +60,7 @@ export function JobsBrowseContent({
   const [draftTagId, setDraftTagId] = useState("");
   const [draftCompatible, setDraftCompatible] = useState(false);
 
-  const [active, setActive] = useState<ActiveFilters>({
-    q: "",
-    location: "",
-    cityId: "",
-    categoryId: "",
-    tagId: "",
-    compatible: false,
-  });
+  const [active, setActive] = useState<ActiveFilters>(emptyFilters);
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -146,111 +151,229 @@ export function JobsBrowseContent({
     });
   }
 
+  function resetFilters() {
+    setDraftQ("");
+    setDraftLocation("");
+    setDraftCityId("");
+    setDraftCategoryId("");
+    setDraftTagId("");
+    setDraftCompatible(false);
+    setActive(emptyFilters);
+  }
+
+  function clearFilter(key: keyof ActiveFilters) {
+    const nextActive = { ...active, [key]: key === "compatible" ? false : "" };
+    setActive(nextActive);
+    if (key === "q") setDraftQ("");
+    if (key === "location") setDraftLocation("");
+    if (key === "cityId") setDraftCityId("");
+    if (key === "categoryId") setDraftCategoryId("");
+    if (key === "tagId") setDraftTagId("");
+    if (key === "compatible") setDraftCompatible(false);
+  }
+
+  const activeChips = useMemo((): FilterChip[] => {
+    const chips: FilterChip[] = [];
+    if (active.q.trim()) chips.push({ key: "q", label: `«${active.q.trim()}»` });
+    if (active.location.trim()) {
+      chips.push({ key: "location", label: active.location.trim() });
+    }
+    if (active.cityId) {
+      const city = cities.find((c) => c.id === active.cityId);
+      chips.push({ key: "cityId", label: city?.name ?? "Город" });
+    }
+    if (active.categoryId) {
+      const cat = categories.find((c) => c.id === active.categoryId);
+      chips.push({
+        key: "categoryId",
+        label: cat ? categoryTreeLabel(cat, categories) : "Категория",
+      });
+    }
+    if (active.tagId) {
+      const tag = tags.find((t) => t.id === active.tagId);
+      chips.push({ key: "tagId", label: tag?.name ?? "Тег" });
+    }
+    if (active.compatible) {
+      chips.push({ key: "compatible", label: "По расписанию" });
+    }
+    return chips;
+  }, [active, cities, categories, tags]);
+
   const inCabinet = detailBasePath.startsWith("/dashboard");
+  const hasDraftChanges =
+    draftQ !== active.q ||
+    draftLocation !== active.location ||
+    draftCityId !== active.cityId ||
+    draftCategoryId !== active.categoryId ||
+    draftTagId !== active.tagId ||
+    draftCompatible !== active.compatible;
 
   return (
-    <PageContainer className="py-10 md:py-12">
+    <PageContainer className={inCabinet ? "py-6 md:py-8" : "py-10 md:py-12"}>
       <PageHeader
         title="Вакансии"
         description={
           inCabinet
-            ? "Лента PUBLISHED: фильтры q, location, cityId, categoryId, tagId; совместимость с расписанием — с JWT студента."
+            ? "Подбор с учётом города, категории и расписания."
             : "Публичная лента. Для фильтра по расписанию войдите как студент."
         }
       />
 
       {catalogError ? (
-        <p className="mb-4 text-sm text-muted-foreground">{catalogError}</p>
+        <p className="mb-3 text-sm text-muted-foreground">{catalogError}</p>
       ) : null}
 
-      <Card className="mb-8">
-        <CardTitle>Фильтры</CardTitle>
-        <CardDescription className="mb-6">
-          Соответствуют query GET /jobs. Нажмите «Применить фильтры», чтобы запросить список снова.
-        </CardDescription>
-        <div className="grid gap-5 md:grid-cols-2">
-          <Input
-            label="Поиск по названию (q)"
-            value={draftQ}
-            onChange={(e) => setDraftQ(e.target.value)}
-            placeholder="Подстрока в title"
-          />
-          <Input
-            label="Локация (location)"
-            value={draftLocation}
-            onChange={(e) => setDraftLocation(e.target.value)}
-            placeholder="Подстрока в поле location"
-          />
-        </div>
-
-        <div className="mt-5 grid gap-5 md:grid-cols-3">
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-foreground">Город (cityId)</span>
-            <select
-              className={selectClass}
+      <div className="mb-5 rounded-xl border border-border/70 bg-card p-3 shadow-sm sm:p-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12">
+          <div className="sm:col-span-2 lg:col-span-2 xl:col-span-3">
+            <Input
+              label="Поиск"
+              value={draftQ}
+              onChange={(e) => setDraftQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyFilters();
+                }
+              }}
+              placeholder="Название вакансии"
+              className="py-2"
+            />
+          </div>
+          <div className="sm:col-span-2 lg:col-span-2 xl:col-span-2">
+            <Input
+              label="Локация"
+              value={draftLocation}
+              onChange={(e) => setDraftLocation(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyFilters();
+                }
+              }}
+              placeholder="Район, адрес"
+              className="py-2"
+            />
+          </div>
+          <div className="lg:col-span-2 xl:col-span-2">
+            <Select
+              label="Город"
               value={draftCityId}
               onChange={(e) => setDraftCityId(e.target.value)}
               disabled={!catalog}
+              className="py-2"
             >
-              <option value="">Все города</option>
+              <option value="">Все</option>
               {cities.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-foreground">
-              Категория (categoryId)
-            </span>
-            <select
-              className={selectClass}
+          <div className="lg:col-span-2 xl:col-span-2">
+            <Select
+              label="Категория"
               value={draftCategoryId}
               onChange={(e) => setDraftCategoryId(e.target.value)}
               disabled={!catalog}
+              className="py-2"
             >
-              <option value="">Все категории</option>
+              <option value="">Все</option>
               {categories.map((c: JobCategory) => (
                 <option key={c.id} value={c.id}>
                   {categoryTreeLabel(c, categories)}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium text-foreground">Тег (tagId)</span>
-            <select
-              className={selectClass}
+          <div className="lg:col-span-2 xl:col-span-2">
+            <Select
+              label="Тег"
               value={draftTagId}
               onChange={(e) => setDraftTagId(e.target.value)}
               disabled={!catalog}
+              className="py-2"
             >
-              <option value="">Все теги</option>
+              <option value="">Все</option>
               {tags.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
               ))}
-            </select>
+            </Select>
+          </div>
+          <div className="flex flex-col justify-end gap-2 sm:col-span-2 lg:col-span-6 xl:col-span-3">
+            {role === "STUDENT" ? (
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border text-accent focus:ring-accent"
+                  checked={draftCompatible}
+                  onChange={(e) => setDraftCompatible(e.target.checked)}
+                />
+                <span>По расписанию</span>
+              </label>
+            ) : (
+              <span className="hidden text-sm text-muted-foreground xl:block" aria-hidden>
+                &nbsp;
+              </span>
+            )}
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                className="flex-1 py-2 sm:flex-none"
+                onClick={applyFilters}
+              >
+                {hasDraftChanges ? "Найти" : "Обновить"}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="py-2"
+                onClick={resetFilters}
+              >
+                Сброс
+              </Button>
+            </div>
           </div>
         </div>
 
-        {role === "STUDENT" ? (
-          <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-border/80 bg-muted/40 px-4 py-3 text-sm">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-border text-accent focus:ring-accent"
-              checked={draftCompatible}
-              onChange={(e) => setDraftCompatible(e.target.checked)}
-            />
-            <span>Совместимо с моим расписанием (compatibleWithSchedule=true, JWT)</span>
-          </label>
+        {activeChips.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+            <span className="text-xs text-muted-foreground">Активно:</span>
+            {activeChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => clearFilter(chip.key)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent",
+                  "hover:bg-accent/15",
+                )}
+              >
+                {chip.label}
+                <span aria-hidden>×</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Сбросить всё
+            </button>
+          </div>
         ) : null}
-        <Button type="button" className="mt-6" onClick={applyFilters}>
-          Применить фильтры
-        </Button>
-      </Card>
+      </div>
+
+      {!loading && !error ? (
+        <p className="mb-4 text-sm text-muted-foreground">
+          {jobs.length === 0
+            ? "Ничего не найдено"
+            : `Найдено: ${jobs.length}`}
+        </p>
+      ) : null}
 
       {error ? (
         <p
@@ -262,9 +385,9 @@ export function JobsBrowseContent({
       ) : null}
 
       {loading ? (
-        <LoadingHint />
+        <JobCardSkeletonList count={3} />
       ) : (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
           {jobs.map((job) => (
             <JobCard key={job.id} job={job} detailBasePath={detailBasePath} />
           ))}
@@ -274,7 +397,7 @@ export function JobsBrowseContent({
       {!loading && jobs.length === 0 && !error ? (
         <EmptyState
           title="Ничего не найдено"
-          description="Попробуйте изменить фильтры или сбросить справочники."
+          description="Измените фильтры или сбросьте их."
         />
       ) : null}
     </PageContainer>

@@ -17,46 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
-
-const taskStatusLabel: Record<InternshipTaskStatus, string> = {
-  TODO:        "К выполнению",
-  IN_PROGRESS: "В работе",
-  DONE:        "Готово",
-};
-
-const taskStatusStyle: Record<InternshipTaskStatus, string> = {
-  TODO:        "bg-muted text-muted-foreground",
-  IN_PROGRESS: "bg-blue-500/10 text-blue-700",
-  DONE:        "bg-success/10 text-success",
-};
+import { getInternshipTaskStatus } from "@/lib/internship-display";
+import { StarRating } from "@/components/ui/star-rating";
+import { selectClass } from "@/lib/select-class";
+import { PageContainer, PageHeader } from "@/components/layout/page";
+import { DetailPageSkeleton } from "@/components/ui/skeleton";
 
 const taskStatuses: InternshipTaskStatus[] = ["TODO", "IN_PROGRESS", "DONE"];
-
-function StarRating({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <div className="flex gap-1">
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onChange(n)}
-          className={`text-2xl transition-colors ${
-            n <= value ? "text-amber-400" : "text-muted"
-          }`}
-        >
-          {n <= value ? "★" : "☆"}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export default function EmployerInternshipDetailPage() {
   const params = useParams();
@@ -80,6 +47,7 @@ export default function EmployerInternshipDetailPage() {
   const [feedback, setFeedback] = useState("");
   const [rating, setRating] = useState(0);
   const [completing, setCompleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,6 +77,7 @@ export default function EmployerInternshipDetailPage() {
   async function addTask() {
     if (!taskTitle.trim()) return;
     setTaskSaving(true);
+    setActionError(null);
     try {
       await api.post<InternshipTask>(routes.internships.createTask(internId), {
         title: taskTitle.trim(),
@@ -120,13 +89,14 @@ export default function EmployerInternshipDetailPage() {
       setTaskDue("");
       await load();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Ошибка");
+      setActionError(e instanceof ApiError ? e.message : "Ошибка");
     } finally {
       setTaskSaving(false);
     }
   }
 
   async function patchTask(taskId: string, status: InternshipTaskStatus) {
+    setActionError(null);
     try {
       await api.patch<InternshipTask>(routes.internships.patchTask(taskId), { status });
       setInternship((prev) => {
@@ -137,16 +107,17 @@ export default function EmployerInternshipDetailPage() {
         };
       });
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Ошибка");
+      setActionError(e instanceof ApiError ? e.message : "Ошибка");
     }
   }
 
   async function completeInternship() {
     if (rating === 0) {
-      alert("Укажите рейтинг (1–5 звёзд)");
+      setActionError("Укажите рейтинг (1–5 звёзд)");
       return;
     }
     setCompleting(true);
+    setActionError(null);
     try {
       await api.post<Internship>(routes.internships.complete(internId), {
         employerFeedback: feedback.trim() || null,
@@ -155,7 +126,7 @@ export default function EmployerInternshipDetailPage() {
       await load();
       setShowComplete(false);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Ошибка");
+      setActionError(e instanceof ApiError ? e.message : "Ошибка");
     } finally {
       setCompleting(false);
     }
@@ -164,7 +135,7 @@ export default function EmployerInternshipDetailPage() {
   if (loading) {
     return (
       <RoleGuard allow={["EMPLOYER"]}>
-        <PageContainer><LoadingHint /></PageContainer>
+        <PageContainer><DetailPageSkeleton /></PageContainer>
       </RoleGuard>
     );
   }
@@ -207,6 +178,12 @@ export default function EmployerInternshipDetailPage() {
           description={job?.title ? `Вакансия: ${job.title}` : undefined}
         />
 
+        {actionError ? (
+          <p className="mb-5 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+            {actionError}
+          </p>
+        ) : null}
+
         {/* Summary */}
         <div className="mb-5 flex flex-wrap gap-4 text-sm text-muted-foreground">
           <span>
@@ -246,9 +223,9 @@ export default function EmployerInternshipDetailPage() {
           {(["TODO", "IN_PROGRESS", "DONE"] as InternshipTaskStatus[]).map((col) => (
             <div key={col}>
               <h3
-                className={`mb-3 rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${taskStatusStyle[col]}`}
+                className={`mb-3 rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-wide ${getInternshipTaskStatus(col).className}`}
               >
-                {taskStatusLabel[col]} ({tasksByStatus[col].length})
+                {getInternshipTaskStatus(col).label} ({tasksByStatus[col].length})
               </h3>
               <ul className="flex flex-col gap-3">
                 {tasksByStatus[col].map((task) => (
@@ -265,14 +242,14 @@ export default function EmployerInternshipDetailPage() {
                       )}
                       <div className="mt-3">
                         <select
-                          className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-xs shadow-sm outline-none"
+                          className={selectClass}
                           value={task.status}
                           onChange={(e) =>
                             void patchTask(task.id, e.target.value as InternshipTaskStatus)
                           }
                         >
                           {taskStatuses.map((s) => (
-                            <option key={s} value={s}>{taskStatusLabel[s]}</option>
+                            <option key={s} value={s}>{getInternshipTaskStatus(s).label}</option>
                           ))}
                         </select>
                       </div>

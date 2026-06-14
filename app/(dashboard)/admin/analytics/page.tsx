@@ -5,11 +5,14 @@ import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
 import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
-import type { PlatformAnalytics } from "@/lib/types";
+import type { AiHealthResponse, HealthResponse, PlatformAnalytics, UserRole } from "@/lib/types";
+import { userRoleLabel } from "@/lib/user-display";
+import { ApiHealthPanel, AiHealthPanel } from "@/components/admin/service-health-panels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
+import { PageContainer, PageHeader } from "@/components/layout/page";
+import { StatsGridSkeleton } from "@/components/ui/skeleton";
 
 const roleColor: Record<string, string> = {
   STUDENT:  "bg-accent",
@@ -23,8 +26,10 @@ export default function AdminAnalyticsPage() {
   const { api } = useSession();
   const [data, setData] = useState<PlatformAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [aiHealth, setAiHealth] = useState<unknown>(null);
+  const [aiHealth, setAiHealth] = useState<AiHealthResponse | null>(null);
   const [aiHealthError, setAiHealthError] = useState<string | null>(null);
+  const [apiHealth, setApiHealth] = useState<HealthResponse | null>(null);
+  const [apiHealthError, setApiHealthError] = useState<string | null>(null);
 
   // HH import
   const [hhText, setHhText] = useState("");
@@ -50,11 +55,29 @@ export default function AdminAnalyticsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const h = await api.get<unknown>(routes.ai.health);
+        const h = await api.get<AiHealthResponse>(routes.ai.health);
         if (!cancelled) { setAiHealth(h); setAiHealthError(null); }
       } catch (e) {
         if (!cancelled)
           setAiHealthError(e instanceof ApiError ? e.message : "Недоступно");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await api.get<HealthResponse>(routes.health);
+        if (!cancelled) {
+          setApiHealth(h);
+          setApiHealthError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setApiHealthError(e instanceof ApiError ? e.message : "Недоступно");
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -129,7 +152,7 @@ export default function AdminAnalyticsPage() {
                   return (
                     <div key={row.role} className="flex items-center gap-4">
                       <span className="w-24 shrink-0 text-sm font-medium text-foreground">
-                        {row.role}
+                        {userRoleLabel(row.role as UserRole)}
                       </span>
                       <div className="flex flex-1 items-center gap-3">
                         <div className="h-6 flex-1 overflow-hidden rounded-full bg-muted">
@@ -152,15 +175,14 @@ export default function AdminAnalyticsPage() {
             </Card>
           </>
         ) : !error ? (
-          <LoadingHint />
+          <StatsGridSkeleton count={6} />
         ) : null}
 
         {/* HH Import */}
         <Card className="mt-6">
           <CardTitle as="h2" className="mb-1">Импорт с HeadHunter</CardTitle>
           <CardDescription className="mb-5">
-            POST /admin/hh-import — парсит вакансии с api.hh.ru и сохраняет как PUBLISHED.
-            Требует HH_IMPORT_ENABLED=true в env.
+            Импорт вакансий с HeadHunter в каталог платформы. Требует включённой интеграции на сервере.
           </CardDescription>
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
@@ -191,17 +213,30 @@ export default function AdminAnalyticsPage() {
           </div>
         </Card>
 
+        {/* API Health */}
+        <Card className="mt-6">
+          <CardTitle as="h2" className="mb-1">Состояние API</CardTitle>
+          <CardDescription className="mb-4">
+            Доступность бэкенда и базовые проверки сервиса.
+          </CardDescription>
+          <ApiHealthPanel
+            health={apiHealth}
+            loading={apiHealth === null && !apiHealthError}
+            error={apiHealthError}
+          />
+        </Card>
+
         {/* AI Health */}
         <Card className="mt-6">
           <CardTitle as="h2" className="mb-1">AI сервис</CardTitle>
-          <CardDescription className="mb-3">GET /ai/health — статус конфигурации AI-модуля.</CardDescription>
-          {aiHealthError ? (
-            <p className="rounded-xl bg-danger/5 px-3 py-2 text-sm text-danger">{aiHealthError}</p>
-          ) : (
-            <pre className="max-h-48 overflow-auto rounded-xl bg-muted/60 p-3 font-mono text-xs leading-relaxed">
-              {aiHealth !== null ? JSON.stringify(aiHealth, null, 2) : "…"}
-            </pre>
-          )}
+          <CardDescription className="mb-4">
+            Статус AI-модуля для подбора вакансий и оценки откликов.
+          </CardDescription>
+          <AiHealthPanel
+            health={aiHealth}
+            loading={aiHealth === null && !aiHealthError}
+            error={aiHealthError}
+          />
         </Card>
       </PageContainer>
     </RoleGuard>

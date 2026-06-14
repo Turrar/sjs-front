@@ -9,28 +9,29 @@ import { useSession } from "@/components/providers/session-provider";
 import type { EmployerAnalytics, EmployerProfile } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { LoadingHint, PageContainer, PageHeader } from "@/components/layout/page";
+import { PageContainer, PageHeader } from "@/components/layout/page";
+import { StatsGridSkeleton } from "@/components/ui/skeleton";
 
-const verificationBadge: Record<string, { label: string; cls: string }> = {
-  PENDING:  { label: "На проверке",  cls: "bg-amber-500/10 text-amber-700 border-amber-300/40" },
-  VERIFIED: { label: "Верифицирован", cls: "bg-success/10 text-success border-success/30" },
-  REJECTED: { label: "Отклонён",     cls: "bg-danger/10 text-danger border-danger/30" },
-};
+import { verificationStatusBadge } from "@/lib/employer-display";
 
 export default function EmployerAnalyticsPage() {
   const { api, user } = useSession();
   const [data, setData] = useState<EmployerAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         const res = await api.get<EmployerAnalytics>(routes.analytics.employerMe);
         if (!cancelled) setData(res);
       } catch (e) {
         if (!cancelled)
           setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -38,7 +39,7 @@ export default function EmployerAnalyticsPage() {
 
   const profile = user?.profile as EmployerProfile | null | undefined;
   const vStatus = profile?.verificationStatus ?? "PENDING";
-  const badge = verificationBadge[vStatus] ?? verificationBadge.PENDING;
+  const badge = verificationStatusBadge(vStatus);
 
   return (
     <RoleGuard allow={["EMPLOYER"]}>
@@ -50,7 +51,7 @@ export default function EmployerAnalyticsPage() {
 
         {/* Verification status banner */}
         {vStatus !== "VERIFIED" && (
-          <div className={`mb-6 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${badge.cls}`}>
+          <div className={`mb-6 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${badge.className} ${badge.borderClass ?? ""}`}>
             <span className="font-medium">{badge.label}</span>
             {vStatus === "PENDING" && (
               <span>— ваша компания ожидает верификации администратором. Вакансии будут видны после подтверждения.</span>
@@ -61,19 +62,26 @@ export default function EmployerAnalyticsPage() {
           </div>
         )}
         {vStatus === "VERIFIED" && (
-          <div className={`mb-6 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm ${badge.cls}`}>
+          <div className={`mb-6 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm ${badge.className} ${badge.borderClass ?? ""}`}>
             <span>✓</span>
             <span className="font-medium">{badge.label}</span>
           </div>
         )}
 
         {error ? (
-          <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
-            {error}
-          </p>
+          <div className="mb-6 space-y-3">
+            <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+              {error}
+            </p>
+            <Button type="button" variant="secondary" onClick={() => window.location.reload()}>
+              Повторить
+            </Button>
+          </div>
         ) : null}
 
-        {data ? (
+        {loading ? (
+          <StatsGridSkeleton count={4} />
+        ) : data ? (
           <div className="grid gap-5 sm:grid-cols-2">
             <Card>
               <CardTitle as="h2">Вакансии</CardTitle>
@@ -90,8 +98,6 @@ export default function EmployerAnalyticsPage() {
               </p>
             </Card>
           </div>
-        ) : !error ? (
-          <LoadingHint />
         ) : null}
 
         {/* Quick actions */}

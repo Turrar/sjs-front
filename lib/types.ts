@@ -35,6 +35,8 @@ export type StudentProfile = {
   timezone: string | null;
   /** После POST /upload/presign + PUT — ключ в PATCH /users/me */
   avatarStorageKey?: string | null;
+  /** Presigned URL из GET /users/me */
+  avatarUrl?: string | null;
   githubUsername?: string | null;
   /** Реальный chat_id не возвращается — только маска или null */
   telegramChatId?: string | null;
@@ -46,6 +48,8 @@ export type EmployerProfile = {
   website: string | null;
   verificationStatus: EmployerVerificationStatus;
   logoStorageKey?: string | null;
+  /** Presigned URL из GET /users/me */
+  logoUrl?: string | null;
   telegramChatId?: string | null;
 };
 
@@ -78,6 +82,8 @@ export type City = {
   nameI18n?: Record<string, string> | null;
   slug: string | null;
   imageStorageKey?: string | null;
+  /** Presigned URL из GET /cities и /catalog/job-form */
+  imageUrl?: string | null;
   sortOrder: number;
   isActive: boolean;
   createdAt?: string;
@@ -88,9 +94,12 @@ export type City = {
 export type JobCategory = {
   id: string;
   name: string;
+  nameI18n?: Record<string, string> | null;
   slug: string | null;
   parentId: string | null;
   imageStorageKey?: string | null;
+  /** Presigned URL из GET /cities и /catalog/job-form */
+  imageUrl?: string | null;
   sortOrder: number;
   isActive: boolean;
   createdAt?: string;
@@ -101,6 +110,7 @@ export type JobCategory = {
 export type Tag = {
   id: string;
   name: string;
+  nameI18n?: Record<string, string> | null;
   slug: string | null;
   isActive: boolean;
   createdAt?: string;
@@ -132,16 +142,43 @@ export type Job = {
   updatedAt?: string;
 };
 
+/** Вложенный профиль в ответах откликов */
+export type ApplicationStudentProfile = {
+  firstName: string | null;
+  lastName: string | null;
+  university: string | null;
+  specialty: string | null;
+};
+
+export type ApplicationJob = Pick<
+  Job,
+  | "id"
+  | "title"
+  | "location"
+  | "salaryMin"
+  | "salaryMax"
+  | "currency"
+  | "city"
+  | "status"
+  | "isPremium"
+  | "employer"
+>;
+
 export type Application = {
   id: string;
   jobId: string;
   studentUserId: string;
+  studentProfileId?: string;
   status: ApplicationStatus;
   coverLetter: string | null;
   employerScore?: number | null;
-  job?: Job;
+  createdAt?: string;
+  updatedAt?: string;
+  job?: ApplicationJob;
   student?: { id: string; email: string };
-  studentProfile?: StudentProfile | null;
+  studentProfile?: ApplicationStudentProfile | null;
+  /** STUDENT: уже оставлен отзыв работодателю по этой вакансии/стажировке */
+  hasReviewed?: boolean;
 };
 
 export type ScheduleSource = {
@@ -178,30 +215,52 @@ export type Message = {
   sender?: { id: string; email: string };
 };
 
-/** GET /notifications — kind из enum на бэкенде */
+/** POST /telegram/link-token */
+export type TelegramLinkTokenResponse = {
+  token: string;
+  deepLink: string;
+  expiresInSeconds: number;
+  instructions: string;
+};
+
 export type NotificationKind =
   | "APPLICATION_UPDATE"
   | "CHAT_MESSAGE"
   | "SCHEDULE_READY"
+  | "JOB_ALERT"
   | "SYSTEM";
 
 /** Payload APPLICATION_UPDATE: у работодателя — новый отклик; у студента — смена статуса */
 export type NotificationPayloadApplicationUpdateEmployer = {
   applicationId: string;
   jobId: string;
-  message: string;
+  message?: string;
+  jobTitle?: string;
+  status?: string;
 };
 
 export type NotificationPayloadApplicationUpdateStudent = {
   applicationId: string;
-  jobId: string;
-  status: string;
+  jobId?: string;
+  status?: string;
+  jobTitle?: string;
+  videoRoom?: boolean;
 };
 
 export type NotificationPayloadChatMessage = {
   applicationId: string;
   messageId: string;
   preview: string;
+};
+
+export type NotificationPayloadJobAlertJob = {
+  id: string;
+  title: string;
+};
+
+export type NotificationPayloadJobAlert = {
+  count: number;
+  jobs: NotificationPayloadJobAlertJob[];
 };
 
 export type Notification = {
@@ -212,6 +271,32 @@ export type Notification = {
   payload: Record<string, unknown> | null;
   readAt: string | null;
   createdAt: string;
+};
+
+/** GET /notifications/unread-count */
+export type UnreadNotificationsResponse = {
+  unreadCount: number;
+};
+
+/** GET /health — NestJS Terminus */
+export type HealthCheckItem = {
+  status: string;
+};
+
+export type HealthResponse = {
+  status: string;
+  info?: Record<string, HealthCheckItem>;
+  error?: Record<string, HealthCheckItem>;
+  details?: Record<string, HealthCheckItem>;
+};
+
+/** GET /ai/health */
+export type AiHealthResponse = {
+  module?: string;
+  openaiEmbeddings?: {
+    configured?: boolean;
+    model?: string | null;
+  };
 };
 
 /** GET/POST/PATCH/DELETE /resume/drafts — только STUDENT; список по updatedAt убыв. */
@@ -247,6 +332,17 @@ export type AdminUserRow = {
   role: UserRole;
   isActive: boolean;
   createdAt: string;
+  /** Только для role EMPLOYER */
+  verificationStatus?: EmployerVerificationStatus;
+  /** Только для role EMPLOYER — название компании или null */
+  companyName?: string | null;
+};
+
+export type AdminJobsResponse = {
+  data: Job[];
+  total: number;
+  page: number;
+  limit: number;
 };
 
 export type PlatformAnalytics = {
@@ -413,6 +509,8 @@ export type Internship = {
     job?: Pick<Job, "id" | "title"> | null;
     student?: { id: string; email: string } | null;
   };
+  /** STUDENT: отзыв о работодателе уже отправлен */
+  hasReviewed?: boolean;
 };
 
 // ─── Public Profile ───────────────────────────────────────────────────────────
@@ -426,6 +524,35 @@ export type GitHubRepo = {
   updatedAt: string;
 };
 
+/** GET /profiles/employer/:userId — публично, без JWT */
+export type PublicEmployerJob = {
+  id: string;
+  title: string;
+  city: City | null;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  currency: string | null;
+  isPremium?: boolean;
+  source?: string;
+  createdAt: string;
+};
+
+export type PublicEmployerProfile = {
+  userId: string;
+  companyName: string;
+  description: string | null;
+  website: string | null;
+  logoUrl: string | null;
+  verificationStatus: EmployerVerificationStatus;
+  /** null — если отзывов ещё нет */
+  avgRating: number | null;
+  reviewCount: number;
+  recentReviews: EmployerReview[];
+  publishedJobsCount: number;
+  publishedJobs: PublicEmployerJob[];
+  createdAt: string;
+};
+
 /** GET /profiles/:userId — публично, без JWT */
 export type PublicProfile = {
   userId: string;
@@ -435,7 +562,7 @@ export type PublicProfile = {
   specialty: string | null;
   bio: string | null;
   portfolioUrl: string | null;
-  avatarStorageKey: string | null;
+  avatarUrl?: string | null;
   githubUsername: string | null;
   githubRepos: GitHubRepo[];
   createdAt: string;
@@ -450,6 +577,21 @@ export type EmployerReview = {
   isAnonymous: boolean;
   createdAt: string;
   reviewer: { userId: string; firstName: string | null; lastName: string | null } | null;
+};
+
+/** GET /reviews/me — отзывы студента о работодателях */
+export type StudentReview = {
+  id: string;
+  employerUserId: string;
+  companyName: string;
+  rating: number;
+  comment: string | null;
+  isAnonymous: boolean;
+  createdAt: string;
+};
+
+export type ReviewsMeResponse = {
+  reviews: StudentReview[];
 };
 
 export type EmployerReviewsResponse = {
@@ -468,6 +610,32 @@ export type KaspiPaymentResponse = {
   paymentUrl: string;
   amount: number;
   currency: string;
+};
+
+/** GET /payments/kaspi/premium/:jobId/status */
+export type KaspiPremiumStatusResponse = {
+  jobId: string;
+  isPremium: boolean;
+  title: string;
+};
+
+/** GET /internships/:id/total-hours */
+export type InternshipTotalHoursResponse = {
+  totalHours: number;
+};
+
+/** POST /video/rooms/:applicationId — EMPLOYER; GET — оба участника */
+export type VideoRoomResponse = {
+  name: string;
+  url: string;
+  token: string;
+  expiresAt: string;
+};
+
+/** GET /media/url?storageKey=... */
+export type MediaUrlResponse = {
+  url: string;
+  expiresIn: number;
 };
 
 // ─── AI responses ─────────────────────────────────────────────────────────────

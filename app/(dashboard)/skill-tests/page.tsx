@@ -11,10 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import {
   EmptyState,
-  LoadingHint,
   PageContainer,
   PageHeader,
 } from "@/components/layout/page";
+import { SimpleListSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
 
 function scoreColor(score: number) {
@@ -55,19 +55,36 @@ export default function SkillTestsPage() {
   const [results, setResults] = useState<SkillTestResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [partialWarning, setPartialWarning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setPartialWarning(null);
     try {
-      const [testsData, badgesData, resultsData] = await Promise.all([
-        api.get<SkillTest[]>(routes.skillTests.list),
-        api.get<SkillBadge[]>(routes.skillTests.badgesMe).catch(() => [] as SkillBadge[]),
-        api.get<SkillTestResult[]>(routes.skillTests.resultsMe).catch(() => [] as SkillTestResult[]),
-      ]);
+      const testsData = await api.get<SkillTest[]>(routes.skillTests.list);
+      let badgesFailed = false;
+      let resultsFailed = false;
+      const badgesData = await api
+        .get<SkillBadge[]>(routes.skillTests.badgesMe)
+        .catch(() => {
+          badgesFailed = true;
+          return [] as SkillBadge[];
+        });
+      const resultsData = await api
+        .get<SkillTestResult[]>(routes.skillTests.resultsMe)
+        .catch(() => {
+          resultsFailed = true;
+          return [] as SkillTestResult[];
+        });
       setTests(testsData);
       setBadges(badgesData);
       setResults(resultsData);
+      if (badgesFailed || resultsFailed) {
+        setPartialWarning(
+          "Часть данных не загрузилась — бейджи или история результатов могут быть неполными.",
+        );
+      }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
     } finally {
@@ -87,6 +104,12 @@ export default function SkillTestsPage() {
           description="Пройдите тест — получите верифицированный бейдж на своём публичном профиле."
         />
 
+        {partialWarning ? (
+          <p className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-800">
+            {partialWarning}
+          </p>
+        ) : null}
+
         {error ? (
           <p className="mb-6 rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
             {error}
@@ -94,7 +117,7 @@ export default function SkillTestsPage() {
         ) : null}
 
         {loading ? (
-          <LoadingHint />
+          <SimpleListSkeleton count={5} />
         ) : (
           <>
             {/* Badges */}
