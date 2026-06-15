@@ -1,6 +1,6 @@
 import { routes } from "@/lib/api-routes";
 import { ApiError } from "@/lib/api-base";
-import type { PresignResponse, UserMe } from "@/lib/types";
+import type { PresignResponse, ResumeDraft, UserMe } from "@/lib/types";
 
 export type ApiPost = {
   post: <T>(path: string, body?: unknown) => Promise<T>;
@@ -17,6 +17,19 @@ export const LOGO_CONTENT_TYPES = [
   "image/jpeg",
   "image/webp",
 ] as const;
+
+export const PDF_CONTENT_TYPE = "application/pdf" as const;
+
+export function validatePdfFile(file: File): string | null {
+  if (!file.name || file.name.length > 255) {
+    return "Имя файла должно быть от 1 до 255 символов.";
+  }
+  const type = file.type || "";
+  if (type !== PDF_CONTENT_TYPE) {
+    return "Поддерживается только PDF.";
+  }
+  return null;
+}
 
 export function validateLogoFile(file: File): string | null {
   if (!file.name || file.name.length > 255) {
@@ -104,4 +117,30 @@ export async function removeCompanyLogo(
   api: ApiPresignClient,
 ): Promise<UserMe> {
   return api.patch<UserMe>(routes.users.me, { logoStorageKey: null });
+}
+
+/** PDF резюме: presign → PUT → PATCH /resume/drafts/:id. */
+export async function uploadResumePdf(
+  api: ApiPresignClient,
+  draftId: string,
+  file: File,
+): Promise<ResumeDraft> {
+  const validationError = validatePdfFile(file);
+  if (validationError) {
+    throw new Error(validationError);
+  }
+  const presign = await requestPresign(api, file);
+  await putFileToPresignedUrl(presign.uploadUrl, file);
+  try {
+    return await api.patch<ResumeDraft>(routes.resume.draftById(draftId), {
+      pdfStorageKey: presign.storageKey,
+    });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 403) {
+      throw new Error(
+        "Нет прав привязать этот файл. Ключ должен начинаться с uploads/{yourUserId}/.",
+      );
+    }
+    throw e;
+  }
 }

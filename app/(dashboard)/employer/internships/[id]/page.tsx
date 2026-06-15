@@ -55,8 +55,7 @@ export default function EmployerInternshipDetailPage() {
     try {
       const data = await api.get<Internship>(routes.internships.byId(internId));
       setInternship(data);
-      const log = await api.get<InternshipLogEntry[]>(routes.internships.log(internId));
-      setLogEntries(log);
+      setLogEntries(data.logEntries ?? []);
       try {
         const h = await api.get<{ totalHours: number }>(routes.internships.totalHours(internId));
         setTotalHours(h.totalHours);

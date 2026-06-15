@@ -13,6 +13,7 @@ export type ApplicationStatus =
   | "SHORTLISTED"
   | "INTERVIEW"
   | "OFFER"
+  | "HIRED"
   | "REJECTED"
   | "WITHDRAWN";
 
@@ -138,6 +139,10 @@ export type Job = {
   tags?: Tag[] | null;
   employerUserId?: string;
   employer?: { companyName?: string | null } | null;
+  /** Только для STUDENT с JWT */
+  hasApplied?: boolean;
+  applicationId?: string | null;
+  applicationStatus?: ApplicationStatus | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -162,6 +167,7 @@ export type ApplicationJob = Pick<
   | "status"
   | "isPremium"
   | "employer"
+  | "employerUserId"
 >;
 
 export type Application = {
@@ -491,6 +497,19 @@ export type InternshipTask = {
   status: InternshipTaskStatus;
   dueDate: string | null;
   createdAt?: string;
+  updatedAt?: string;
+};
+
+/** POST /internships/:id/log */
+export type InternshipAddLogBody = {
+  date: string;
+  hours: number;
+  description?: string;
+};
+
+/** PATCH /internships/tasks/:taskId — студент только status */
+export type InternshipUpdateTaskBody = {
+  status?: InternshipTaskStatus;
 };
 
 export type Internship = {
@@ -501,8 +520,11 @@ export type Internship = {
   status: InternshipStatus;
   employerFeedback: string | null;
   employerRating: number | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /** GET /internships/:id — журнал в logEntries */
   logEntries?: InternshipLogEntry[];
   tasks?: InternshipTask[];
   application?: {
@@ -570,11 +592,34 @@ export type PublicProfile = {
 
 // ─── Employer Reviews ─────────────────────────────────────────────────────────
 
+export type ReviewRating = 1 | 2 | 3 | 4 | 5;
+
+/** POST /reviews — только STUDENT */
+export type CreateReviewBody = {
+  employerUserId: string;
+  rating: ReviewRating;
+  comment?: string;
+  isAnonymous?: boolean;
+};
+
+/** POST /reviews — 201 */
+export type CreateReviewResponse = {
+  id: string;
+  employerUserId: string;
+  rating: number;
+  comment: string | null;
+  isAnonymous: boolean;
+  createdAt: string;
+  /** Только если isAnonymous: false */
+  studentUserId?: string;
+};
+
 export type EmployerReview = {
   id: string;
   rating: number;
   comment: string | null;
-  isAnonymous: boolean;
+  /** Есть в recentReviews профиля; в GET /reviews/employer — только reviewer */
+  isAnonymous?: boolean;
   createdAt: string;
   reviewer: { userId: string; firstName: string | null; lastName: string | null } | null;
 };
@@ -583,7 +628,7 @@ export type EmployerReview = {
 export type StudentReview = {
   id: string;
   employerUserId: string;
-  companyName: string;
+  companyName: string | null;
   rating: number;
   comment: string | null;
   isAnonymous: boolean;
@@ -597,7 +642,7 @@ export type ReviewsMeResponse = {
 export type EmployerReviewsResponse = {
   employerUserId: string;
   companyName: string | null;
-  avgRating: number;
+  avgRating: number | null;
   reviewCount: number;
   reviews: EmployerReview[];
 };
@@ -642,4 +687,8 @@ export type MediaUrlResponse = {
 
 export type CoverLetterResponse = { text: string };
 export type InterviewPrepResponse = { questions: string[] };
-export type ResumeSuggestionsResponse = Record<string, unknown>;
+
+export type ResumeSuggestionLanguage = "ru" | "kk" | "en";
+
+/** GET /resume/drafts/:id/suggestions */
+export type ResumeSuggestionsResponse = { suggestions: string[] };

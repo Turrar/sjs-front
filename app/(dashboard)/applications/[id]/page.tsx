@@ -12,6 +12,7 @@ import type {
   ApplicationStatus,
   CoverLetterResponse,
   InterviewPrepResponse,
+  Job,
 } from "@/lib/types";
 import { jobLocationLine, salaryLine } from "@/lib/job-display";
 import {
@@ -21,6 +22,7 @@ import {
   isTerminalApplicationStatus,
 } from "@/lib/application-display";
 import { StudentVideoInterview } from "@/components/applications/video-interview-actions";
+import { EmployerReviewStatus } from "@/components/reviews/employer-review-modal";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageContainer } from "@/components/layout/page";
@@ -119,6 +121,7 @@ export default function ApplicationDetailPage() {
   const { api, user } = useSession();
 
   const [app, setApp] = useState<Application | null>(null);
+  const [employerUserId, setEmployerUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -139,6 +142,16 @@ export default function ApplicationDetailPage() {
     try {
       const found = await api.get<Application>(routes.applications.byId(applicationId));
       setApp(found);
+      let employerId = found.job?.employerUserId ?? null;
+      if (!employerId && found.jobId) {
+        try {
+          const job = await api.get<Job>(routes.jobs.byId(found.jobId));
+          employerId = job.employerUserId ?? null;
+        } catch {
+          /* optional fallback */
+        }
+      }
+      setEmployerUserId(employerId);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ошибка загрузки");
     } finally {
@@ -396,6 +409,20 @@ export default function ApplicationDetailPage() {
                   </p>
                 ) : null}
                 <StudentVideoInterview applicationId={app.id} status={app.status} />
+              </Card>
+
+              <Card className="space-y-3">
+                <h2 className="text-base font-semibold text-foreground">
+                  Отзыв о компании
+                </h2>
+                <EmployerReviewStatus
+                  hasReviewed={app.hasReviewed === true}
+                  employerUserId={employerUserId}
+                  companyName={app.job?.employer?.companyName}
+                  onReviewed={() =>
+                    setApp((prev) => (prev ? { ...prev, hasReviewed: true } : prev))
+                  }
+                />
               </Card>
 
               {canStudentWithdraw(app.status) ? (

@@ -7,17 +7,14 @@ import {
   employerRatingLine,
   publishedJobsLabel,
 } from "@/lib/employer-profile-display";
+import { reviewerDisplayName } from "@/lib/review-display";
 import { jobLocationLine, salaryLine } from "@/lib/job-display";
 import { PremiumBadge } from "@/components/ui/premium-badge";
 import { StarRating } from "@/components/ui/star-rating";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 
 function ReviewPreview({ review }: { review: EmployerReview }) {
-  const name =
-    review.isAnonymous || !review.reviewer
-      ? "Анонимно"
-      : [review.reviewer.firstName, review.reviewer.lastName].filter(Boolean).join(" ") ||
-        "Студент";
+  const name = reviewerDisplayName(review);
 
   return (
     <div className="rounded-xl border border-border/70 bg-card px-4 py-3">
@@ -74,6 +71,8 @@ type EmployerPublicViewProps = {
   compact?: boolean;
   /** Ссылка на полную страницу компании */
   companyPageHref?: string;
+  /** Базовый путь страницы компании для ссылки «Все отзывы» */
+  employerPageHref?: string;
 };
 
 export function EmployerPublicView({
@@ -82,6 +81,7 @@ export function EmployerPublicView({
   headerOnly = false,
   compact = false,
   companyPageHref,
+  employerPageHref,
 }: EmployerPublicViewProps) {
   const badge = verificationStatusBadge(profile.verificationStatus);
   const reviews = profile.recentReviews ?? [];
@@ -141,7 +141,17 @@ export function EmployerPublicView({
 
       {!headerOnly && !compact && reviews.length > 0 ? (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Последние отзывы</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Последние отзывы</h3>
+            {profile.reviewCount > 0 ? (
+              <Link
+                href={`${employerPageHref ?? `/employers/${profile.userId}`}/reviews`}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Все отзывы ({profile.reviewCount})
+              </Link>
+            ) : null}
+          </div>
           <div className="space-y-2">
             {reviews.map((review) => (
               <ReviewPreview key={review.id} review={review} />
@@ -180,23 +190,41 @@ export function EmployerPublicPageSections({
   profile: PublicEmployerProfile;
   jobsHrefPrefix?: string;
 }) {
+  const employerBase = `/employers/${profile.userId}`;
+
   return (
     <div className="space-y-6">
       <Card>
         <EmployerPublicView profile={profile} jobsHrefPrefix={jobsHrefPrefix} headerOnly />
       </Card>
 
-      {profile.recentReviews.length > 0 ? (
+      {profile.reviewCount > 0 || profile.recentReviews.length > 0 ? (
         <Card>
-          <CardTitle>Отзывы</CardTitle>
-          <CardDescription className="mb-4">
-            Последние отзывы студентов о компании.
-          </CardDescription>
-          <div className="space-y-3">
-            {profile.recentReviews.map((review) => (
-              <ReviewPreview key={review.id} review={review} />
-            ))}
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>Отзывы</CardTitle>
+              <CardDescription>
+                Последние отзывы студентов о компании.
+              </CardDescription>
+            </div>
+            {profile.reviewCount > 0 ? (
+              <Link
+                href={`${employerBase}/reviews`}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Все отзывы ({profile.reviewCount})
+              </Link>
+            ) : null}
           </div>
+          {profile.recentReviews.length > 0 ? (
+            <div className="space-y-3">
+              {profile.recentReviews.map((review) => (
+                <ReviewPreview key={review.id} review={review} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Пока нет отзывов.</p>
+          )}
         </Card>
       ) : null}
 

@@ -415,14 +415,14 @@ export default function EmployerApplicationDetailPage() {
             <Button variant="secondary">Открыть чат</Button>
           </Link>
           <EmployerVideoInterview applicationId={appId} status={app.status} />
-          {app.status === "OFFER" && (
+          {app.status === "OFFER" || app.status === "HIRED" ? (
             <Button
               onClick={() => void createInternship()}
               disabled={internshipLoading}
             >
               {internshipLoading ? "Создание…" : "Открыть трекер стажировки"}
             </Button>
-          )}
+          ) : null}
         </div>
       </PageContainer>
     </RoleGuard>

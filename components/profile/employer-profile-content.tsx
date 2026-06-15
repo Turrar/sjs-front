@@ -10,7 +10,7 @@ import { fetchPublic } from "@/lib/session-api";
 import type { EmployerProfile, PublicEmployerProfile, UserMe } from "@/lib/types";
 import { verificationStatusBadge } from "@/lib/employer-display";
 import { employerRatingLine } from "@/lib/employer-profile-display";
-import { TELEGRAM_LINKED_MASK } from "@/lib/notification-payload";
+import { isTelegramLinked } from "@/lib/telegram-display";
 import { BackendGapNote } from "@/components/profile/backend-gap-note";
 import { EmployerLogoModal } from "@/components/profile/employer-logo-modal";
 import { TelegramNotificationsSection } from "@/components/profile/telegram-notifications-section";
@@ -149,7 +149,7 @@ export function EmployerProfileContent({ user }: EmployerProfileContentProps) {
   const [logoModalOpen, setLogoModalOpen] = useState(false);
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
 
-  const telegramLinked = employerProfile?.telegramChatId === TELEGRAM_LINKED_MASK;
+  const telegramLinked = isTelegramLinked(employerProfile);
   const publicCompanyUrl = `/employers/${user.id}`;
 
   useEffect(() => {
@@ -330,6 +330,7 @@ export function EmployerProfileContent({ user }: EmployerProfileContentProps) {
             linked={telegramLinked}
             embedded
             onError={(msg) => setError(msg || null)}
+            onLinked={() => void refreshUser()}
           />
         </Card>
 

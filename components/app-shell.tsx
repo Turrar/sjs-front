@@ -32,6 +32,7 @@ function navSectionsForRole(role: UserRole): NavSection[] {
           items: [
             { href: "/dashboard/jobs", label: "Вакансии" },
             { href: "/applications", label: "Отклики" },
+            { href: "/reviews", label: "Мои отзывы" },
             { href: "/internships", label: "Стажировки" },
             { href: "/job-alerts", label: "Подписки" },
           ],

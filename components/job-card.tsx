@@ -33,6 +33,7 @@ export function JobCard({
   const companyName =
     job.employer?.companyName?.trim() || "Работодатель";
   const hiringOpen = job.status === "PUBLISHED";
+  const alreadyApplied = job.hasApplied === true && job.applicationId;
 
   return (
     <article
@@ -96,10 +97,16 @@ export function JobCard({
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <Link href={href} className={cn(btnBase, btnPrimary)}>
-          Откликнуться
-        </Link>
-        <Link href={`${href}#contact`} className={cn(btnBase, btnSecondary)}>
+        {alreadyApplied ? (
+          <Link href={`/applications/${job.applicationId}`} className={cn(btnBase, btnPrimary)}>
+            Мой отклик
+          </Link>
+        ) : (
+          <Link href={href} className={cn(btnBase, btnPrimary)}>
+            Откликнуться
+          </Link>
+        )}
+        <Link href={href} className={cn(btnBase, btnSecondary)}>
           Подробнее
         </Link>
       </div>

@@ -7,8 +7,14 @@ import { ApiError } from "@/lib/api-base";
 import { useSession } from "@/components/providers/session-provider";
 import { routes } from "@/lib/api-routes";
 import { fetchPublic } from "@/lib/session-api";
-import type { Job, PublicEmployerProfile } from "@/lib/types";
-import { categoryTreeLabel, jobLocationLine, salaryLine } from "@/lib/job-display";
+import type { Application, Job, PublicEmployerProfile } from "@/lib/types";
+import {
+  canStudentApplyToJob,
+  categoryTreeLabel,
+  jobLocationLine,
+  salaryLine,
+} from "@/lib/job-display";
+import { getStatusStyle } from "@/lib/application-display";
 import { employerRatingLine } from "@/lib/employer-profile-display";
 import { verificationStatusBadge } from "@/lib/employer-display";
 import { JobDescriptionView } from "@/components/job-description-view";
@@ -81,6 +87,14 @@ function EmployerStrip({
         <p className="text-sm text-muted-foreground">
           {employerRatingLine(profile.avgRating, profile.reviewCount)}
         </p>
+        {profile.reviewCount > 0 ? (
+          <Link
+            href={`/employers/${employerUserId}/reviews`}
+            className="inline-block text-sm font-medium text-accent hover:underline"
+          >
+            Отзывы о компании →
+          </Link>
+        ) : null}
       </div>
     </div>
   );
@@ -156,7 +170,7 @@ export function JobDetailContent({ jobsListHref }: JobDetailContentProps) {
     setApplyError(null);
     setApplyPending(true);
     try {
-      const app = await api.post<{ id: string }>(routes.applications.create, {
+      const app = await api.post<Application>(routes.applications.create, {
         jobId: id,
         coverLetter: coverLetter.trim() || undefined,
       });
@@ -198,7 +212,10 @@ export function JobDetailContent({ jobsListHref }: JobDetailContentProps) {
     );
   }
 
-  const canApply = user?.role === "STUDENT" && job.status === "PUBLISHED";
+  const canApply = canStudentApplyToJob(job, user?.role);
+  const hasApplied = user?.role === "STUDENT" && job.hasApplied === true;
+  const applicationStatusStyle =
+    job.applicationStatus != null ? getStatusStyle(job.applicationStatus) : null;
   const locationLine = jobLocationLine(job);
   const salary = salaryLine(job);
   const categoryLabels =
@@ -231,6 +248,39 @@ export function JobDetailContent({ jobsListHref }: JobDetailContentProps) {
       >
         {applyPending ? "Отправка…" : "Откликнуться"}
       </Button>
+    </Card>
+  ) : hasApplied ? (
+    <Card className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-foreground">Отклик отправлен</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Вы уже откликались на эту вакансию.
+        </p>
+      </div>
+      {applicationStatusStyle ? (
+        <span
+          className={cn(
+            "inline-flex rounded-full px-3 py-1 text-xs font-medium",
+            applicationStatusStyle.className,
+          )}
+        >
+          {applicationStatusStyle.label}
+        </span>
+      ) : null}
+      {job.applicationId ? (
+        <Link
+          href={`/applications/${job.applicationId}`}
+          className="inline-flex text-sm font-medium text-accent underline-offset-4 hover:underline"
+        >
+          Мой отклик →
+        </Link>
+      ) : null}
+      <Link
+        href="/applications"
+        className="inline-flex text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+      >
+        Все отклики
+      </Link>
     </Card>
   ) : user?.role !== "STUDENT" ? (
     <Card>

@@ -67,8 +67,7 @@ export function JobsBrowseContent({
   const [loading, setLoading] = useState(true);
 
   const role = user?.role;
-  const tokenForRequest =
-    active.compatible && role === "STUDENT" ? accessToken : undefined;
+  const tokenForRequest = role === "STUDENT" ? accessToken : undefined;
 
   useEffect(() => {
     let cancelled = false;

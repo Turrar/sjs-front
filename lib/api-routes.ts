@@ -133,10 +133,12 @@ export const routes = {
   },
   internships: {
     mine: "/internships/mine",
-    open: "/internships/open",
+    /** POST — открыть трекер (EMPLOYER, application OFFER|HIRED) */
+    open: "/internships",
     byId: (id: string) => `/internships/${id}`,
     createTask: (id: string) => `/internships/${id}/tasks`,
     complete: (id: string) => `/internships/${id}/complete`,
+    /** POST — добавить запись в журнал (STUDENT, ACTIVE) */
     log: (id: string) => `/internships/${id}/log`,
     totalHours: (id: string) => `/internships/${id}/total-hours`,
     patchTask: (taskId: string) => `/internships/tasks/${taskId}`,

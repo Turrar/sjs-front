@@ -6,13 +6,14 @@ export type StatusStyle = {
 };
 
 export const applicationStatusStyles: Record<ApplicationStatus, StatusStyle> = {
-  SUBMITTED:   { label: "Отправлен",        className: "bg-muted/70 text-muted-foreground" },
-  REVIEWING:   { label: "На рассмотрении",  className: "bg-sky-500/10 text-sky-700" },
-  SHORTLISTED: { label: "В списке",         className: "bg-sky-500/15 text-sky-700" },
-  INTERVIEW:   { label: "Интервью",         className: "bg-violet-500/10 text-violet-700" },
-  OFFER:       { label: "Оффер",            className: "bg-success/10 text-success" },
-  REJECTED:    { label: "Отклонён",         className: "bg-danger/10 text-danger" },
-  WITHDRAWN:   { label: "Отозван",          className: "bg-muted/70 text-muted-foreground" },
+  SUBMITTED:   { label: "Отправлен",            className: "bg-muted/70 text-muted-foreground" },
+  REVIEWING:   { label: "На рассмотрении",      className: "bg-sky-500/10 text-sky-700" },
+  SHORTLISTED: { label: "В списке кандидатов",  className: "bg-sky-500/15 text-sky-700" },
+  INTERVIEW:   { label: "Собеседование",        className: "bg-violet-500/10 text-violet-700" },
+  OFFER:       { label: "Оффер",                className: "bg-success/10 text-success" },
+  HIRED:       { label: "Принят",               className: "bg-success/15 text-success" },
+  REJECTED:    { label: "Отклонён",             className: "bg-danger/10 text-danger" },
+  WITHDRAWN:   { label: "Отозван",              className: "bg-muted/70 text-muted-foreground" },
 };
 
 /** Alias for notification-display and external use */
@@ -27,6 +28,7 @@ export const applicationStatusOrder: ApplicationStatus[] = [
   "SHORTLISTED",
   "INTERVIEW",
   "OFFER",
+  "HIRED",
 ];
 
 export const allApplicationStatuses: ApplicationStatus[] = [

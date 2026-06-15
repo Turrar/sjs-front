@@ -8,7 +8,7 @@ import { useSession } from "@/components/providers/session-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import type { StudentProfile, UserMe } from "@/lib/types";
 import { userRoleLabel } from "@/lib/user-display";
-import { TELEGRAM_LINKED_MASK } from "@/lib/notification-payload";
+import { isTelegramLinked } from "@/lib/telegram-display";
 import {
   putFileToPresignedUrl,
   requestPresign,
@@ -85,7 +85,7 @@ export function StudentProfileContent({ user }: StudentProfileContentProps) {
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const telegramLinked = studentProfile?.telegramChatId === TELEGRAM_LINKED_MASK;
+  const telegramLinked = isTelegramLinked(studentProfile);
   const publicProfileUrl = `/profiles/${user.id}`;
   const displayName = studentDisplayName(form, user.email);
   const subtitle = studentSubtitle(form);
@@ -327,6 +327,7 @@ export function StudentProfileContent({ user }: StudentProfileContentProps) {
             linked={telegramLinked}
             embedded
             onError={(msg) => setError(msg || null)}
+            onLinked={() => void refreshUser()}
           />
         </Card>
 

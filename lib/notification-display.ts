@@ -14,9 +14,10 @@ function str(p: Record<string, unknown>, key: string): string | undefined {
 const STATUS_RU: Record<string, string> = {
   SUBMITTED: "Отправлен",
   REVIEWING: "На рассмотрении",
-  SHORTLISTED: "В шорт-листе",
+  SHORTLISTED: "В списке кандидатов",
   INTERVIEW: "Собеседование",
-  OFFER: "Предложение",
+  OFFER: "Оффер",
+  HIRED: "Принят",
   REJECTED: "Отклонён",
   WITHDRAWN: "Отозван",
 };

@@ -1,30 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MessageCircle } from "lucide-react";
 import { routes } from "@/lib/api-routes";
-import { ApiError } from "@/lib/api-base";
 import { useSession } from "@/components/providers/session-provider";
 import { useToast } from "@/components/providers/toast-provider";
 import type { EmployerProfile, StudentProfile, TelegramLinkTokenResponse } from "@/lib/types";
 import {
+  isTelegramLinked,
   TELEGRAM_LINK_POLL_MS,
-  TELEGRAM_LINKED_MASK,
-} from "@/lib/notification-payload";
+  TELEGRAM_POLLING_HINT_MS,
+  telegramLinkErrorMessage,
+} from "@/lib/telegram-display";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 
 type TelegramNotificationsSectionProps = {
   linked: boolean;
   onError: (message: string) => void;
-  onLinked?: () => void;
+  onLinked?: () => void | Promise<void>;
   /** Без внешней рамки — родительская Card уже оформляет секцию */
   embedded?: boolean;
 };
-
-function isProfileTelegramLinked(
-  profile: StudentProfile | EmployerProfile | null | undefined,
-): boolean {
-  return profile?.telegramChatId === TELEGRAM_LINKED_MASK;
-}
 
 export function TelegramNotificationsSection({
   linked,
@@ -33,20 +30,25 @@ export function TelegramNotificationsSection({
   embedded = false,
 }: TelegramNotificationsSectionProps) {
   const { api, refreshUser, user } = useSession();
-  const toast = useToast();
+  const { success: toastSuccess, error: toastError } = useToast();
+
   const [loading, setLoading] = useState(false);
   const [linkData, setLinkData] = useState<TelegramLinkTokenResponse | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [polling, setPolling] = useState(false);
+  const [expired, setExpired] = useState(false);
+  const [showSlowHint, setShowSlowHint] = useState(false);
+
   const linkedNotifiedRef = useRef(false);
+  const pollingStartedAtRef = useRef<number | null>(null);
 
   const checkLinkedFromUser = useCallback(() => {
     if (!user?.profile) return false;
-    return isProfileTelegramLinked(
-      user.profile as StudentProfile | EmployerProfile,
-    );
+    return isTelegramLinked(user.profile as StudentProfile | EmployerProfile);
   }, [user?.profile]);
+
+  const isLinked = linked || checkLinkedFromUser();
 
   useEffect(() => {
     if (!expiresAt) {
@@ -59,6 +61,9 @@ export function TelegramNotificationsSection({
       if (left <= 0) {
         setLinkData(null);
         setPolling(false);
+        setExpired(true);
+        pollingStartedAtRef.current = null;
+        setShowSlowHint(false);
       }
     };
     tick();
@@ -66,18 +71,21 @@ export function TelegramNotificationsSection({
     return () => window.clearInterval(id);
   }, [expiresAt]);
 
-  const handleLinked = useCallback(() => {
+  const handleLinked = useCallback(async () => {
     if (linkedNotifiedRef.current) return;
     linkedNotifiedRef.current = true;
     setLinkData(null);
     setExpiresAt(null);
     setPolling(false);
-    toast.success("Telegram успешно привязан");
-    onLinked?.();
-  }, [onLinked, toast]);
+    setExpired(false);
+    setShowSlowHint(false);
+    pollingStartedAtRef.current = null;
+    toastSuccess("Telegram подключён");
+    await onLinked?.();
+  }, [onLinked, toastSuccess]);
 
   useEffect(() => {
-    if (!polling || linked || checkLinkedFromUser()) return;
+    if (!polling || isLinked) return;
     const id = window.setInterval(() => {
       void (async () => {
         try {
@@ -88,31 +96,51 @@ export function TelegramNotificationsSection({
       })();
     }, TELEGRAM_LINK_POLL_MS);
     return () => window.clearInterval(id);
-  }, [polling, linked, checkLinkedFromUser, refreshUser]);
+  }, [polling, isLinked, refreshUser]);
 
   useEffect(() => {
-    if (!polling) return;
-    if (linked || checkLinkedFromUser()) {
-      handleLinked();
+    if (!polling || isLinked) return;
+    if (checkLinkedFromUser()) {
+      void handleLinked();
     }
-  }, [polling, linked, checkLinkedFromUser, handleLinked, user?.profile]);
+  }, [polling, isLinked, checkLinkedFromUser, handleLinked, user?.profile]);
+
+  useEffect(() => {
+    if (!polling || isLinked) {
+      setShowSlowHint(false);
+      return;
+    }
+    const started = pollingStartedAtRef.current ?? Date.now();
+    pollingStartedAtRef.current = started;
+    const id = window.setInterval(() => {
+      if (Date.now() - started >= TELEGRAM_POLLING_HINT_MS) {
+        setShowSlowHint(true);
+      }
+    }, 5_000);
+    return () => window.clearInterval(id);
+  }, [polling, isLinked]);
 
   async function requestLink() {
     setLoading(true);
+    setExpired(false);
+    linkedNotifiedRef.current = false;
+    pollingStartedAtRef.current = null;
+    setShowSlowHint(false);
     onError("");
     try {
       const res = await api.post<TelegramLinkTokenResponse>(routes.telegram.linkToken);
       setLinkData(res);
       setExpiresAt(Date.now() + res.expiresInSeconds * 1000);
       setPolling(true);
+      pollingStartedAtRef.current = Date.now();
       window.open(res.deepLink, "_blank", "noopener,noreferrer");
     } catch (e) {
-      const msg =
-        e instanceof ApiError
-          ? e.message
-          : "Не удалось получить ссылку. Возможно, Telegram-бот не настроен на сервере.";
+      const msg = telegramLinkErrorMessage(
+        e,
+        "Не удалось получить ссылку. Возможно, Telegram-бот не настроен на сервере.",
+      );
       onError(msg);
-      toast.error(msg);
+      toastError(msg);
     } finally {
       setLoading(false);
     }
@@ -124,41 +152,57 @@ export function TelegramNotificationsSection({
     try {
       await refreshUser();
       if (checkLinkedFromUser()) {
-        handleLinked();
+        await handleLinked();
       }
     } catch (e) {
-      onError(e instanceof ApiError ? e.message : "Не удалось обновить статус");
+      onError(telegramLinkErrorMessage(e, "Не удалось обновить статус"));
     } finally {
       setLoading(false);
     }
   }
 
-  const wrapperClass = embedded ? "space-y-3" : "rounded-xl border border-border/80 bg-muted/30 p-4";
+  const wrapperClass = embedded
+    ? "space-y-3"
+    : "rounded-xl border border-border/80 bg-muted/30 p-4";
 
   return (
-    <div className={wrapperClass}>
+    <div id="telegram" className={wrapperClass}>
       {!embedded ? (
-        <>
-          <p className="text-sm font-medium text-foreground">Telegram-уведомления</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Telegram дублирует важные события SJS (отклики, чат, видеосозвон) — это не чат
-            платформы. Привязка только через бота, chat_id вручную не принимается.
-          </p>
-        </>
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
+            <MessageCircle className="h-4 w-4" aria-hidden />
+          </span>
+          <div className="min-w-0 space-y-1">
+            <p className="text-sm font-medium text-foreground">Telegram-уведомления</p>
+            <p className="text-xs text-muted-foreground">
+              Дублирует отклики, сообщения в чате и подписки на вакансии. Привязка только
+              через бота — chat_id вручную не принимается.
+            </p>
+          </div>
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Дублирует отклики, сообщения в чате и видеосозвоны. Привязка только через бота.
+          Дублирует отклики, чат и подписки на вакансии. Привязка только через бота.
         </p>
       )}
-      {linked ? (
-        <p className="mt-3 inline-flex rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">
-          Telegram привязан
+
+      {isLinked ? (
+        <p
+          className={cn(
+            "inline-flex rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success",
+            !embedded && "mt-3",
+          )}
+        >
+          Telegram подключён
         </p>
       ) : (
-        <p className="mt-3 text-xs text-muted-foreground">Telegram не привязан.</p>
+        <p className={cn("text-xs text-muted-foreground", !embedded && "mt-3")}>
+          Telegram не привязан
+        </p>
       )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {!linked ? (
+
+      {!isLinked ? (
+        <div className={cn("flex flex-wrap gap-2", !embedded && "mt-3")}>
           <Button
             type="button"
             variant="secondary"
@@ -167,17 +211,24 @@ export function TelegramNotificationsSection({
           >
             {loading ? "Загрузка…" : "Привязать Telegram"}
           </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="ghost"
-          className="text-sm"
-          disabled={loading}
-          onClick={() => void checkLinked()}
-        >
-          Проверить статус
-        </Button>
-      </div>
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-sm"
+            disabled={loading}
+            onClick={() => void checkLinked()}
+          >
+            Проверить статус
+          </Button>
+        </div>
+      ) : null}
+
+      {expired && !isLinked ? (
+        <p className="mt-3 rounded-xl border border-border/80 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Ссылка истекла. Нажмите «Привязать Telegram» снова.
+        </p>
+      ) : null}
+
       {linkData ? (
         <div className="mt-4 space-y-2 rounded-xl border border-accent/20 bg-card p-3 text-sm">
           <p className="text-muted-foreground">{linkData.instructions}</p>
@@ -189,10 +240,8 @@ export function TelegramNotificationsSection({
           >
             Открыть бота в Telegram
           </a>
-          {polling && !linked ? (
-            <p className="text-xs text-muted-foreground">
-              Ожидаем подтверждение в Telegram…
-            </p>
+          {polling && !isLinked ? (
+            <p className="text-xs text-accent">Ожидаем Start в Telegram…</p>
           ) : null}
           {secondsLeft != null && secondsLeft > 0 ? (
             <p className="text-xs text-muted-foreground">
@@ -201,6 +250,13 @@ export function TelegramNotificationsSection({
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {showSlowHint && polling && !isLinked ? (
+        <p className="mt-3 rounded-xl border border-border/80 bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          Если после Start в боте статус не обновляется, возможна проблема на сервере
+          (длинный токен в ссылке). Попробуйте позже или обратитесь в поддержку.
+        </p>
       ) : null}
     </div>
   );

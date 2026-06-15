@@ -98,3 +98,11 @@ export function getJobStatusLabel(status: JobStatus): string {
 export function getJobStatusStyle(status: JobStatus): string {
   return jobStatusStyles[status] ?? "bg-muted/70 text-muted-foreground";
 }
+
+/** STUDENT может откликнуться: вакансия опубликована и отклика ещё нет */
+export function canStudentApplyToJob(
+  job: Pick<Job, "status" | "hasApplied">,
+  role?: string,
+): boolean {
+  return role === "STUDENT" && job.status === "PUBLISHED" && job.hasApplied !== true;
+}
