@@ -9,6 +9,7 @@ import { useSession } from "@/components/providers/session-provider";
 import type { Application } from "@/lib/types";
 import { jobLocationLine } from "@/lib/job-display";
 import { getStatusStyle } from "@/lib/application-display";
+import { ApplicationResumeCard } from "@/components/applications/application-resume-card";
 import { Button } from "@/components/ui/button";
 import {
   EmptyState,
@@ -119,6 +120,11 @@ export default function MyApplicationsPage() {
                             <span className="font-normal">/100</span>
                           </span>
                         </p>
+                      ) : null}
+                      {app.resume ? (
+                        <div className="mt-1.5">
+                          <ApplicationResumeCard resume={app.resume} compact />
+                        </div>
                       ) : null}
                     </div>
                     <div className="flex shrink-0 gap-2">

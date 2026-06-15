@@ -33,6 +33,7 @@ import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { PageContainer, PageHeader } from "@/components/layout/page";
 import { FormSkeleton } from "@/components/ui/skeleton";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { JobApplicationRequirements } from "@/components/employer/job-application-requirements";
 import { useToast } from "@/components/providers/toast-provider";
 
 import { selectClass } from "@/lib/select-class";
@@ -65,6 +66,8 @@ export default function EditJobPage() {
   const [requiredWeeklyHours, setRequiredWeeklyHours] = useState("");
   const [status, setStatus] = useState<JobStatus>("DRAFT");
   const [workRows, setWorkRows] = useState<WorkWindowRow[]>([]);
+  const [requiresResume, setRequiresResume] = useState(false);
+  const [requiresCoverLetter, setRequiresCoverLetter] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -119,6 +122,8 @@ export default function EditJobPage() {
         );
         setStatus(j.status);
         setWorkRows(workWindowsFromApi(j.workWindows));
+        setRequiresResume(j.requiresResume === true);
+        setRequiresCoverLetter(j.requiresCoverLetter === true);
       } catch (e) {
         if (!cancelled)
           setError(e instanceof Error ? e.message : "Ошибка загрузки");
@@ -217,6 +222,8 @@ export default function EditJobPage() {
         body.requiredWeeklyHours = parseInt(requiredWeeklyHours, 10);
       body.workWindows =
         workRows.length > 0 ? workWindowsToApi(workRows) : [];
+      body.requiresResume = requiresResume;
+      body.requiresCoverLetter = requiresCoverLetter;
       const updated = await api.patch<Job>(routes.jobs.byId(id), body);
       setJob(updated);
       toast.success("Вакансия сохранена");
@@ -320,6 +327,14 @@ export default function EditJobPage() {
                 </div>
               </>
             ) : null}
+
+            <JobApplicationRequirements
+              requiresResume={requiresResume}
+              requiresCoverLetter={requiresCoverLetter}
+              onRequiresResumeChange={setRequiresResume}
+              onRequiresCoverLetterChange={setRequiresCoverLetter}
+              disabled={pending}
+            />
 
             <div className="flex flex-col gap-2">
               <label className="text-sm font-medium text-foreground">

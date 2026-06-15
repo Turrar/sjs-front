@@ -27,6 +27,7 @@ import {
   getEmployerStatusSelectOptions,
   transitionErrorMessage,
 } from "@/lib/application-status-fsm";
+import { ApplicationResumeCard } from "@/components/applications/application-resume-card";
 import { selectClass } from "@/lib/select-class";
 
 export default function JobApplicationsPage() {
@@ -198,6 +199,11 @@ export default function JobApplicationsPage() {
                             </Link>
                           )}
                         </div>
+                        {app.resume ? (
+                          <div className="mt-2">
+                            <ApplicationResumeCard resume={app.resume} compact />
+                          </div>
+                        ) : null}
                         {app.coverLetter ? (
                           <div className="mt-3 rounded-xl bg-muted/50 p-4">
                             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

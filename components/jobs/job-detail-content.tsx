@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ApiError } from "@/lib/api-base";
 import { useSession } from "@/components/providers/session-provider";
 import { routes } from "@/lib/api-routes";
 import { fetchPublic } from "@/lib/session-api";
-import type { Application, Job, PublicEmployerProfile } from "@/lib/types";
+import type { Job, PublicEmployerProfile } from "@/lib/types";
 import {
   canStudentApplyToJob,
   categoryTreeLabel,
@@ -21,7 +20,7 @@ import { JobDescriptionView } from "@/components/job-description-view";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PremiumBadge } from "@/components/ui/premium-badge";
-import { Textarea } from "@/components/ui/textarea";
+import { JobApplyPanel } from "@/components/jobs/job-apply-panel";
 import { PageContainer } from "@/components/layout/page";
 import { DetailPageSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/cn";
@@ -103,14 +102,10 @@ function EmployerStrip({
 export function JobDetailContent({ jobsListHref }: JobDetailContentProps) {
   const params = useParams();
   const id = params.id as string;
-  const router = useRouter();
-  const { user, accessToken, api } = useSession();
+  const { user, accessToken } = useSession();
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [coverLetter, setCoverLetter] = useState("");
-  const [applyError, setApplyError] = useState<string | null>(null);
-  const [applyPending, setApplyPending] = useState(false);
   const [employerProfile, setEmployerProfile] = useState<PublicEmployerProfile | null>(null);
 
   const inCabinet = jobsListHref.startsWith("/dashboard");
@@ -162,28 +157,6 @@ export function JobDetailContent({ jobsListHref }: JobDetailContentProps) {
     };
   }, [job?.employerUserId, accessToken]);
 
-  async function apply() {
-    if (!user || user.role !== "STUDENT") {
-      router.push(`/login?from=${encodeURIComponent(loginReturnPath)}`);
-      return;
-    }
-    setApplyError(null);
-    setApplyPending(true);
-    try {
-      const app = await api.post<Application>(routes.applications.create, {
-        jobId: id,
-        coverLetter: coverLetter.trim() || undefined,
-      });
-      router.push(`/applications/${app.id}`);
-    } catch (e) {
-      setApplyError(
-        e instanceof ApiError ? e.message : "Не удалось откликнуться",
-      );
-    } finally {
-      setApplyPending(false);
-    }
-  }
-
   const pageClass = cn(
     inCabinet ? "max-w-4xl py-6 md:py-8" : "narrow py-8 md:py-10",
   );
@@ -222,33 +195,7 @@ export function JobDetailContent({ jobsListHref }: JobDetailContentProps) {
     job.categories?.map((c) => categoryTreeLabel(c, job.categories ?? [])) ?? [];
 
   const applyPanel = canApply ? (
-    <Card className="space-y-4">
-      <div>
-        <h2 className="text-base font-semibold text-foreground">Откликнуться</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Сопроводительное письмо необязательно.
-        </p>
-      </div>
-      <Textarea
-        label="Сопроводительное письмо"
-        value={coverLetter}
-        onChange={(e) => setCoverLetter(e.target.value)}
-        maxLength={8000}
-        placeholder="Почему вам интересна эта вакансия"
-      />
-      {applyError ? (
-        <p className="rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">
-          {applyError}
-        </p>
-      ) : null}
-      <Button
-        className="w-full"
-        onClick={() => void apply()}
-        disabled={applyPending}
-      >
-        {applyPending ? "Отправка…" : "Откликнуться"}
-      </Button>
-    </Card>
+    <JobApplyPanel job={job} jobId={id} loginReturnPath={loginReturnPath} />
   ) : hasApplied ? (
     <Card className="space-y-3">
       <div>

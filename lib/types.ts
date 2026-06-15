@@ -133,6 +133,8 @@ export type Job = {
   categoryIds?: string[] | null;
   tagIds?: string[] | null;
   isPremium?: boolean;
+  requiresResume?: boolean;
+  requiresCoverLetter?: boolean;
   /** GET /jobs, GET /jobs/:id — связи из каталога */
   city?: City | null;
   categories?: JobCategory[] | null;
@@ -168,7 +170,24 @@ export type ApplicationJob = Pick<
   | "isPremium"
   | "employer"
   | "employerUserId"
+  | "requiresResume"
+  | "requiresCoverLetter"
 >;
+
+/** Снимок резюме в ответе отклика */
+export type ApplicationResume = {
+  id: string;
+  title: string | null;
+  pdfStorageKey: string | null;
+  pdfUrl?: string | null;
+};
+
+/** POST /applications */
+export type CreateApplicationBody = {
+  jobId: string;
+  resumeDraftId?: string;
+  coverLetter?: string;
+};
 
 export type Application = {
   id: string;
@@ -177,6 +196,8 @@ export type Application = {
   studentProfileId?: string;
   status: ApplicationStatus;
   coverLetter: string | null;
+  resumeDraftId?: string | null;
+  resume?: ApplicationResume | null;
   employerScore?: number | null;
   createdAt?: string;
   updatedAt?: string;

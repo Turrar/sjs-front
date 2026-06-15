@@ -21,6 +21,7 @@ import {
   getStatusStyle,
   isTerminalApplicationStatus,
 } from "@/lib/application-display";
+import { ApplicationResumeCard } from "@/components/applications/application-resume-card";
 import { StudentVideoInterview } from "@/components/applications/video-interview-actions";
 import { EmployerReviewStatus } from "@/components/reviews/employer-review-modal";
 import { Button } from "@/components/ui/button";
@@ -313,6 +314,15 @@ export default function ApplicationDetailPage() {
                 </h2>
                 <ApplicationStatusStepper status={app.status} />
               </section>
+
+              {app.resume ? (
+                <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">
+                  <h2 className="mb-3 text-base font-semibold text-foreground">
+                    Резюме
+                  </h2>
+                  <ApplicationResumeCard resume={app.resume} />
+                </section>
+              ) : null}
 
               {app.coverLetter ? (
                 <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-sm">

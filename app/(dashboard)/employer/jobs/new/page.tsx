@@ -31,6 +31,7 @@ import {
 import { FormSkeleton } from "@/components/ui/skeleton";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { JobWizardSteps } from "@/components/employer/job-wizard-steps";
+import { JobApplicationRequirements } from "@/components/employer/job-application-requirements";
 import { useToast } from "@/components/providers/toast-provider";
 import { Select } from "@/components/ui/select";
 
@@ -53,6 +54,8 @@ export default function NewJobPage() {
   const [currency, setCurrency] = useState("KZT");
   const [requiredWeeklyHours, setRequiredWeeklyHours] = useState("");
   const [workRows, setWorkRows] = useState<WorkWindowRow[]>([]);
+  const [requiresResume, setRequiresResume] = useState(false);
+  const [requiresCoverLetter, setRequiresCoverLetter] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -206,6 +209,8 @@ export default function NewJobPage() {
       if (workRows.length > 0) {
         body.workWindows = workWindowsToApi(workRows);
       }
+      body.requiresResume = requiresResume;
+      body.requiresCoverLetter = requiresCoverLetter;
       const job = await api.post<Job>(routes.jobs.list, body);
       toast.success("Черновик вакансии создан");
       router.push(`/employer/jobs/${job.id}/edit`);
@@ -311,6 +316,13 @@ export default function NewJobPage() {
                       </div>
                     ))}
                   </div>
+                  <JobApplicationRequirements
+                    requiresResume={requiresResume}
+                    requiresCoverLetter={requiresCoverLetter}
+                    onRequiresResumeChange={setRequiresResume}
+                    onRequiresCoverLetterChange={setRequiresCoverLetter}
+                    disabled={pending}
+                  />
                 </>
               ) : null}
 
@@ -323,6 +335,8 @@ export default function NewJobPage() {
                   <p><span className="text-muted-foreground">Зарплата:</span> {salaryMin || salaryMax ? `${salaryMin || "?"} – ${salaryMax || "?"} ${currency}` : "по договорённости"}</p>
                   <p><span className="text-muted-foreground">Часов/нед:</span> {requiredWeeklyHours || "—"}</p>
                   <p><span className="text-muted-foreground">Окон работы:</span> {workRows.length}</p>
+                  <p><span className="text-muted-foreground">Резюме обязательно:</span> {requiresResume ? "да" : "нет"}</p>
+                  <p><span className="text-muted-foreground">Письмо обязательно:</span> {requiresCoverLetter ? "да" : "нет"}</p>
                 </div>
               ) : null}
 

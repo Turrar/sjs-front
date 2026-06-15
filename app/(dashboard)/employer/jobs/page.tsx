@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api-base";
 import { RoleGuard } from "@/components/role-guard";
 import { useSession } from "@/components/providers/session-provider";
 import type { Job, KaspiPaymentResponse } from "@/lib/types";
+import { jobRequirementBadges } from "@/lib/application-apply";
 import { salaryLine, getJobStatusLabel, getJobStatusStyle, jobLocationLine } from "@/lib/job-display";
 import { pollKaspiPremiumStatus } from "@/lib/kaspi-payment";
 import { PremiumBadge } from "@/components/ui/premium-badge";
@@ -171,6 +172,18 @@ export default function EmployerJobsPage() {
                         ) : null}
                         {salary ? <span>{salary}</span> : null}
                       </div>
+                      {jobRequirementBadges(job).length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {jobRequirementBadges(job).map((badge) => (
+                            <span
+                              key={badge.label}
+                              className={`rounded-full px-2 py-0.5 text-xs font-medium ${badge.className}`}
+                            >
+                              {badge.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {!job.isPremium && job.status === "PUBLISHED" && (

@@ -15,6 +15,7 @@ import type {
   SkillBadge,
 } from "@/lib/types";
 import { EmployerVideoInterview } from "@/components/applications/video-interview-actions";
+import { ApplicationResumeCard } from "@/components/applications/application-resume-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import {
@@ -371,6 +372,14 @@ export default function EmployerApplicationDetailPage() {
             </div>
           </Card>
         )}
+
+        {/* Resume snapshot */}
+        {app.resume ? (
+          <Card className="mt-5">
+            <CardTitle as="h2" className="mb-3">Резюме кандидата</CardTitle>
+            <ApplicationResumeCard resume={app.resume} />
+          </Card>
+        ) : null}
 
         {/* Cover letter */}
         {app.coverLetter && (
